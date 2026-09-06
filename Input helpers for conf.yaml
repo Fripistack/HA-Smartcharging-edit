@@ -1,0 +1,73 @@
+# ============================================================================
+# Input_number helpers voor Frank Energie Smart Battery Manager v3.3
+# ============================================================================
+# Deze entity-namen komen exact overeen met de defaults in de blueprint.
+# Aanmaken via Instellingen -> Apparaten & diensten -> Helpers -> + Helper
+# toevoegen -> Nummer (dan hoef je dit bestand niet te gebruiken), OF plak dit
+# blok in configuration.yaml onder een (eventueel al bestaande) "input_number:"
+# sleutel en herstart Home Assistant.
+# ============================================================================
+
+input_number:
+  max_price_cap:
+    name: "Absolute Max Price"
+    min: 0
+    max: 2.0
+    step: 0.01
+    initial: 0.35
+    unit_of_measurement: "EUR"
+    icon: mdi:currency-eur
+
+  morning_survival_target:
+    name: "Morning Survival Target"
+    min: 10
+    max: 80
+    step: 1
+    initial: 20
+    unit_of_measurement: "%"
+    icon: mdi:weather-night
+
+  buffer_discount_percentage:
+    name: "Opportunistische Laaddrempel"
+    min: 10
+    max: 90
+    step: 1
+    initial: 40
+    unit_of_measurement: "%"
+    icon: mdi:sale
+
+  min_discharge_margin:
+    name: "Minimale Verkoopmarge"
+    min: 0
+    max: 100
+    step: 1
+    initial: 20
+    unit_of_measurement: "%"
+    icon: mdi:cash-plus
+
+  min_base_soc:
+    name: "Absolute Minimum SoC"
+    min: 0
+    max: 100
+    step: 1
+    initial: 15
+    unit_of_measurement: "%"
+    icon: mdi:battery-alert
+
+  target_soc_winter:
+    name: "Target SoC Winter"
+    min: 10
+    max: 100
+    step: 1
+    initial: 90
+    unit_of_measurement: "%"
+    icon: mdi:snowflake
+
+  target_soc_summer:
+    name: "Target SoC Zomer"
+    min: 10
+    max: 100
+    step: 1
+    initial: 90
+    unit_of_measurement: "%"
+    icon: mdi:white-balance-sunny
