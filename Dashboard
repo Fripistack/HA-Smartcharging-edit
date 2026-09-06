@@ -1,0 +1,334 @@
+# ============================================================================
+# Dashboard: Frank Energie Smart Battery Manager (bij blueprint v3.0)
+# ============================================================================
+# Let op: als je dit via de visuele "Bewerken in YAML"-modus van het
+# dashboard zelf plakt (i.p.v. als los YAML-dashboard-bestand), gaan deze
+# commentaarregels bij de eerstvolgende opslag automatisch verloren — dat is
+# normaal gedrag van Home Assistant's UI-beheerde dashboards, geen fout.
+#
+# Vereiste HACS-card: "apexcharts-card" (voor de twee grafieken).
+# ============================================================================
+
+title: Batterij Beheer
+views:
+  - title: Batterij
+    path: batterij-beheer
+    icon: mdi:home-battery
+    type: sections
+    sections:
+      # ------------------------------------------------------------------
+      # SECTIE 1: Live status
+      # ------------------------------------------------------------------
+      - type: grid
+        cards:
+          - type: heading
+            heading: Live status
+            icon: mdi:pulse
+          - type: entities
+            title: Automation & Omvormer
+            state_color: true
+            entities:
+              - entity: select.pv_omvormer_work_mode
+                name: Werkmodus (Solis)
+                icon: mdi:tune-variant
+              - entity: sensor.batterij_status
+                name: Batterij
+                icon: mdi:battery-charging
+              - entity: switch.pv_omvormer_allow_grid_to_charge_the_battery
+                name: Allow Grid To Charge
+              - type: divider
+              - entity: binary_sensor.frank_cheap_period
+                name: Nu in Cheap Zone
+              - entity: binary_sensor.frank_expensive_period
+                name: Nu in Expensive Zone
+          - color: state
+            type: entities
+            title: Meetwaarden
+            entities:
+              - entity: sensor.pv_omvormer_battery_soc
+                name: Accu SoC
+              - entity: sensor.pv_omvormer_battery_power
+                name: Batterijvermogen
+              - entity: sensor.pv_omvormer_total_pv_power
+                name: PV Opbrengst
+              - entity: sensor.pv_omvormer_ac_grid_port_power
+                name: Net (Import/Export)
+              - type: divider
+              - entity: sensor.frank_current_price
+                name: Huidige prijs
+              - entity: input_number.laatste_laadprijs
+                name: Laatste inkoopprijs
+
+      # ------------------------------------------------------------------
+      # SECTIE 1B: Instellingen (live aanpasbaar, geen automation-edit nodig)
+      # ------------------------------------------------------------------
+      - type: grid
+        cards:
+          - type: heading
+            heading: Instellingen
+            icon: mdi:cog
+
+          - type: entities
+            title: Strategie-parameters
+            entities:
+              - entity: input_number.morning_survival_target
+                name: Nacht-baseline SoC
+                icon: mdi:weather-night
+              - entity: input_number.min_base_soc
+                name: Absolute Minimum SoC
+                icon: mdi:battery-alert
+              - type: divider
+              - entity: input_number.target_soc_winter
+                name: Target SoC Winter
+                icon: mdi:snowflake
+              - entity: input_number.target_soc_summer
+                name: Target SoC Zomer
+                icon: mdi:white-balance-sunny
+              - type: divider
+              - entity: input_number.buffer_discount_percentage
+                name: Opportunistische Laaddrempel
+                icon: mdi:sale
+              - entity: input_number.min_discharge_margin
+                name: Minimale Verkoopmarge
+                icon: mdi:cash-plus
+              - entity: input_number.max_price_cap
+                name: Absolute Max Price
+                icon: mdi:currency-eur
+
+      # ------------------------------------------------------------------
+      # SECTIE 2: Prijzen vandaag & morgen
+      # ------------------------------------------------------------------
+      - type: grid
+        cards:
+          - type: heading
+            heading: Prijzen vandaag & morgen
+            icon: mdi:chart-line
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Frank Energie EUR/kWh
+              show_states: false
+            graph_span: 48h
+            span:
+              start: day
+            now:
+              show: true
+              label: Nu
+              color: "#ff0000"
+            apex_config:
+              chart:
+                height: 260
+              stroke:
+                curve: stepline
+            series:
+              - entity: sensor.frank_prices_today
+                name: Vandaag
+                type: line
+                color: "#03a9f4"
+                data_generator: |
+                  return entity.attributes.prices.map((p) => {
+                    return [new Date(p.from).getTime(), p.total_price_eur_kwh];
+                  });
+              - entity: sensor.frank_prices_tomorrow
+                name: Morgen
+                type: line
+                color: "#9c27b0"
+                data_generator: |
+                  if (!entity.attributes.prices) { return []; }
+                  return entity.attributes.prices.map((p) => {
+                    return [new Date(p.from).getTime(), p.total_price_eur_kwh];
+                  });
+              - entity: input_number.laatste_laadprijs
+                name: Inkoopprijs (referentie)
+                type: line
+                stroke_width: 1
+                color: "#9e9e9e"
+                data_generator: |
+                  const v = parseFloat(entity.state);
+                  const now = Date.now();
+                  return [[now - 24*3600*1000, v], [now + 24*3600*1000, v]];
+          - type: history-graph
+            entities:
+              - entity: sensor.frank_cheapest_today
+                name: Goedkoopste prijs
+              - entity: sensor.frank_most_expensive_today
+                name: Duurste prijs
+              - entity: sensor.frank_current_price
+                name: Huidige prijs
+              - entity: sensor.frank_current_return_price
+                name: Teruglever prijs
+            hours_to_show: 24
+
+      # ------------------------------------------------------------------
+      # SECTIE 3: Tijdlijn komende 24 uur
+      # ------------------------------------------------------------------
+      - type: grid
+        cards:
+          - type: heading
+            heading: Tijdlijn komende 24 uur
+            icon: mdi:timeline-clock
+          - type: markdown
+            grid_options:
+              columns: full
+              rows: auto
+            content: |-
+              {% set now_ts = as_timestamp(now()) %}
+              {% set today_str = now().strftime('%Y-%m-%d') %}
+              {% set tomorrow_str = (now() + timedelta(days=1)).strftime('%Y-%m-%d') %}
+              {% set na = ['unknown', 'unavailable', 'none', ''] %}
+              {% set tomorrow_midnight_ts = as_timestamp(today_str ~ ' 00:00:00') + 86400 %}
+              {% set ns = namespace(events=[]) %}
+
+              {# --- Cheap Zone vandaag --- #}
+              {% set cs = states('sensor.frank_cheap_zone_start_today') %}
+              {% set ce = states('sensor.frank_cheap_zone_end_today') %}
+              {% if cs not in na %}
+                {% set start_ts = as_timestamp(cs) %}
+                {% set end_ts = as_timestamp(ce) if ce not in na else none %}
+                {% set dur = ((end_ts - start_ts) / 3600) | round(1) if end_ts else none %}
+                {% set ns.events = ns.events + [{'ts': start_ts, 'icon': '🔋', 'label': 'Laden start (Cheap Zone)', 'extra': ('Zone duurt ~' ~ dur ~ 'u — accu laadt eerst bij op zon, schakelt pas naar geforceerd netladen op het laatst mogelijke moment.') if dur else '', 'day': 'vandaag' if start_ts < tomorrow_midnight_ts else 'morgen'}] %}
+                {% if end_ts %}
+                  {% set ns.events = ns.events + [{'ts': end_ts, 'icon': '✅', 'label': 'Cheap Zone eindigt', 'extra': 'Accu zou nu vol (of zo vol mogelijk) moeten zijn.', 'day': 'vandaag' if end_ts < tomorrow_midnight_ts else 'morgen'}] %}
+                {% endif %}
+              {% endif %}
+
+              {# --- Expensive Zone vandaag --- #}
+              {% set es = states('sensor.frank_expensive_zone_start_today') %}
+              {% set ee = states('sensor.frank_expensive_zone_end_today') %}
+              {% if es not in na %}
+                {% set start_ts2 = as_timestamp(es) %}
+                {% set end_ts2 = as_timestamp(ee) if ee not in na else none %}
+                {% set dur2 = ((end_ts2 - start_ts2) / 3600) | round(1) if end_ts2 else none %}
+                {% set ns.events = ns.events + [{'ts': start_ts2, 'icon': '💰', 'label': 'Verkopen start (Expensive Zone)', 'extra': ('Zone duurt ~' ~ dur2 ~ 'u — Feed-in Priority actief tot de nacht-baseline bereikt is.') if dur2 else '', 'day': 'vandaag' if start_ts2 < tomorrow_midnight_ts else 'morgen'}] %}
+                {% if end_ts2 %}
+                  {% set ns.events = ns.events + [{'ts': end_ts2, 'icon': '🔒', 'label': 'Expensive Zone eindigt / nacht-baseline', 'extra': 'Accu wordt vastgezet (Reserve/Backup) tot de volgende cheap zone.', 'day': 'vandaag' if end_ts2 < tomorrow_midnight_ts else 'morgen'}] %}
+                {% endif %}
+              {% endif %}
+
+              {# --- Losse prijs-extremen vandaag --- #}
+              {% set ct = states('sensor.frank_cheapest_time_today') %}
+              {% if ct not in na %}
+                {% set ct_ts = as_timestamp(today_str ~ ' ' ~ ct ~ ':00') %}
+                {% if ct_ts %}
+                  {% set ns.events = ns.events + [{'ts': ct_ts, 'icon': '📉', 'label': 'Goedkoopste moment vandaag', 'extra': (states('sensor.frank_cheapest_today') ~ ' EUR/kWh'), 'day': 'vandaag'}] %}
+                {% endif %}
+              {% endif %}
+              {% set mt = states('sensor.frank_most_expensive_time_today') %}
+              {% if mt not in na %}
+                {% set mt_ts = as_timestamp(today_str ~ ' ' ~ mt ~ ':00') %}
+                {% if mt_ts %}
+                  {% set ns.events = ns.events + [{'ts': mt_ts, 'icon': '📈', 'label': 'Duurste moment vandaag', 'extra': (states('sensor.frank_most_expensive_today') ~ ' EUR/kWh'), 'day': 'vandaag'}] %}
+                {% endif %}
+              {% endif %}
+
+              {# --- Losse prijs-extremen morgen (alleen als al gepubliceerd) --- #}
+              {% if is_state('binary_sensor.frank_tomorrow_prices_available', 'on') %}
+                {% set ctt = states('sensor.frank_cheapest_time_tomorrow') %}
+                {% if ctt not in na %}
+                  {% set ctt_ts = as_timestamp(tomorrow_str ~ ' ' ~ ctt ~ ':00') %}
+                  {% if ctt_ts %}
+                    {% set ns.events = ns.events + [{'ts': ctt_ts, 'icon': '📉', 'label': 'Goedkoopste moment morgen', 'extra': (states('sensor.frank_cheapest_tomorrow') ~ ' EUR/kWh'), 'day': 'morgen'}] %}
+                  {% endif %}
+                {% endif %}
+                {% set mtt = states('sensor.frank_most_expensive_time_tomorrow') %}
+                {% if mtt not in na %}
+                  {% set mtt_ts = as_timestamp(tomorrow_str ~ ' ' ~ mtt ~ ':00') %}
+                  {% if mtt_ts %}
+                    {% set ns.events = ns.events + [{'ts': mtt_ts, 'icon': '📈', 'label': 'Duurste moment morgen', 'extra': (states('sensor.frank_most_expensive_tomorrow') ~ ' EUR/kWh'), 'day': 'morgen'}] %}
+                  {% endif %}
+                {% endif %}
+              {% endif %}
+
+              {% set all_events = ns.events | sort(attribute='ts') %}
+              {% set past_events = all_events | selectattr('ts', 'le', now_ts) | selectattr('ts', 'gt', now_ts - 7200) | list %}
+              {% set future_events = all_events | selectattr('ts', 'gt', now_ts) | selectattr('ts', 'le', now_ts + 86400) | list %}
+              {% set today_events = future_events | selectattr('day', 'eq', 'vandaag') | list %}
+              {% set tomorrow_events = future_events | selectattr('day', 'eq', 'morgen') | list %}
+
+              ## 📍 Nu — {{ states('sensor.frank_current_price') }} EUR/kWh · SoC {{ states('sensor.pv_omvormer_battery_soc') }}% · {{ states('select.pv_omvormer_work_mode') }}
+
+              {% if past_events | length > 0 %}
+              {% set le = past_events[-1] %}
+              _Recent: **{{ le.ts | timestamp_custom('%H:%M', true) }}** {{ le.icon }} {{ le.label }} ({{ (((now_ts - le.ts) / 60) | round(0)) }} min geleden)_
+
+              {% endif %}
+              ---
+
+              ### ☀️ Vandaag
+              {% if today_events | length == 0 %}
+              Geen aankomende gebeurtenissen meer vandaag.
+              {% else %}
+              {% for e in today_events %}
+              {% set mins_away = ((e.ts - now_ts) / 60) | round(0) %}
+              {% set h_away = (mins_away // 60) | int %}
+              {% set m_away = (mins_away % 60) | int %}
+              **{{ e.ts | timestamp_custom('%H:%M', true) }}** &nbsp; {{ e.icon }} &nbsp; **{{ e.label }}** &nbsp; `over {{ h_away }}u {{ m_away }}m`
+              {% if e.extra %}
+              &nbsp;&nbsp;&nbsp;&nbsp;_{{ e.extra }}_
+              {% endif %}
+
+              {% endfor %}
+              {% endif %}
+
+              ### 🌙 Morgen
+              {% if tomorrow_events | length == 0 %}
+              Nog geen gebeurtenissen bekend voor morgen{% if not is_state('binary_sensor.frank_tomorrow_prices_available', 'on') %} (prijzen nog niet gepubliceerd){% endif %}.
+              {% else %}
+              {% for e in tomorrow_events %}
+              {% set mins_away = ((e.ts - now_ts) / 60) | round(0) %}
+              {% set h_away = (mins_away // 60) | int %}
+              {% set m_away = (mins_away % 60) | int %}
+              **{{ e.ts | timestamp_custom('%H:%M', true) }}** &nbsp; {{ e.icon }} &nbsp; **{{ e.label }}** &nbsp; `over {{ h_away }}u {{ m_away }}m`
+              {% if e.extra %}
+              &nbsp;&nbsp;&nbsp;&nbsp;_{{ e.extra }}_
+              {% endif %}
+
+              {% endfor %}
+              {% endif %}
+          - type: entities
+            title: Losse blok-extremen (referentie)
+            entities:
+              - entity: sensor.frank_cheapest_today
+                name: Goedkoopste blok
+              - entity: sensor.frank_cheapest_time_today
+                name: Starttijd goedkoopste blok
+              - entity: sensor.frank_most_expensive_today
+                name: Duurste blok
+              - entity: sensor.frank_most_expensive_time_today
+                name: Starttijd duurste blok
+              - type: divider
+              - entity: binary_sensor.frank_tomorrow_prices_available
+                name: Prijzen morgen bekend?
+
+      # ------------------------------------------------------------------
+      # SECTIE 4: Historie laatste 24 uur
+      # ------------------------------------------------------------------
+      - type: grid
+        cards:
+          - type: heading
+            heading: Historie laatste 24 uur
+            icon: mdi:history
+          - type: custom:apexcharts-card
+            header:
+              show: true
+              title: Batterij activiteit
+            graph_span: 12h
+            series:
+              - entity: sensor.pv_omvormer_battery_charge_power
+                name: Laden
+                type: area
+                color: "#4caf50"
+              - entity: sensor.pv_omvormer_battery_discharge_power
+                name: Ontladen
+                type: line
+                color: "#ffc107"
+          - type: history-graph
+            title: Werkmodus & Zones
+            hours_to_show: 24
+            entities:
+              - entity: select.pv_omvormer_work_mode
+                name: Werkmodus
+              - entity: binary_sensor.frank_cheap_period
+                name: Cheap Zone
+              - entity: binary_sensor.frank_expensive_period
+                name: Expensive Zone
