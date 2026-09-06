@@ -1,0 +1,1673 @@
+blueprint:
+  name: "Frank Energie - Smart Battery Manager v3.6"
+  description: >
+    Slimme batterij-automation voor Frank Energie kwartierprijzen (compatibel met de
+    `ha-frank-quarter-prices` integratie) en Solis-omvormers (via `solis_modbus`).
+
+    **v3.6 — écht meer dan huisverbruik verkopen:** "Feed-in Priority" alleen bleek bij Solis de
+    ontlading vaak te begrenzen tot het huisverbruik (meter bleef op 0, ook tijdens een Expensive
+    Zone). Nieuw: optioneel "Feed-in Priority + TOU", waarbij de automation elke cyclus (~5 min) het
+    Solis-ontlaadvenster (`time_charging_discharge_start/end_slot_1`) oprekt naar 'nu tot over 10
+    minuten', zodat er altijd een geldig TOU-venster actief is zolang er verkocht moet worden. Laat de
+    twee tijdvenster-velden leeg om terug te vallen op alleen "Feed-in Priority" (oud gedrag).
+
+    **v3.5 — batterij absorbeert overschot bij negatieve terugleverprijs:** zodra de kale
+    terugleverprijs negatief wordt en de accu nog niet vol is, schakelt de omvormer met hoge prioriteit
+    naar Self-Use zodat het zonoverschot eerst de accu vult in plaats van verlieslatend te worden
+    geëxporteerd. Is de accu al vol, dan blokkeert de bestaande backflow-bescherming de export (0 op
+    de meter).
+
+    **v3.4 — status-log en notificatie-controle** via `input_text`/`input_boolean`-helpers.
+
+    **v3.3 — standaardwaarden ingevuld voor Fripistack's installatie.**
+
+    **v3.2 — duidelijkere instellingen** ("Buffer Discount" en "Min. Discharge Profit").
+
+    **v3.1 — instellingen aanpasbaar via dashboard** met `input_number`-helpers.
+
+    **v3.0 — architectuurwijziging:** één `select.pv_omvormer_work_mode`-entiteit i.p.v. losse
+    schakelaars. Self-Use is overal de standaard buiten momenten van bewust geforceerd laden/verkopen.
+
+    **Strategieën (in volgorde van prioriteit) en de modus die ze aanzetten:**
+    1. **Boost Mode** — handmatig, forceert *Self-Use + TOU* en Target SoC 100%.
+    2. **Emergency Charge** — *Self-Use + TOU* zodra SoC onder de veiligheidsbodem dreigt te zakken.
+    3. **Negatieve Terugleverprijs** — *Self-Use* zolang de accu nog ruimte heeft.
+    4. **Zone-modus** [optioneel] — *Self-Use (+TOU)* om te laden, *Feed-in Priority (+TOU)* om te
+       verkopen tot de nacht-baseline, dan *Reserve / Backup*.
+    5. **Smart Charging/Discharging/Solar Bypass/Smart Hold** — prijsdrempel-fallback wanneer
+       Zone-modus niet actief is.
+
+    Alle sensoren en instellingen staan gegroepeerd in secties hieronder. De meeste secties zijn
+    optioneel — laat ze leeg om de bijbehorende functionaliteit uit te schakelen.
+  domain: automation
+  input:
+    basis_omvormer:
+      name: "Basis: Batterij & Omvormer"
+      icon: mdi:home-battery
+      collapsed: false
+      input:
+        work_mode_select:
+          name: "Select: Solis Work Mode"
+          description: >-
+            select.pv_omvormer_work_mode (of vergelijkbaar) - de ene entiteit die alle laad/ontlaad-
+            gedrag bepaalt. Vervangt de vroegere losse Reserve/Time-Of-Use/Feed-in-switches.
+          default: "select.pv_omvormer_work_mode"
+          selector:
+            entity:
+              domain: select
+        mode_self_use_text:
+          name: "Optie-naam: Self-Use"
+          description: "Exacte tekst van deze optie zoals die in jouw select.pv_omvormer_work_mode staat."
+          default: "Self-Use"
+          selector:
+            text:
+        mode_self_use_tou_text:
+          name: "Optie-naam: Self-Use + TOU"
+          description: "Gebruikt zodra geforceerd netladen nodig is (Boost, Emergency, Zone/Smart Charging)."
+          default: "Self-Use + TOU"
+          selector:
+            text:
+        mode_feed_in_text:
+          name: "Optie-naam: Feed-in Priority"
+          default: "Feed-in Priority"
+          selector:
+            text:
+        mode_reserve_text:
+          name: "Optie-naam: Reserve / Backup"
+          description: "Alleen gebruikt om de accu hard vast te zetten (nacht-baseline in Expensive Zone)."
+          default: "Reserve / Backup"
+          selector:
+            text:
+        mode_feed_in_tou_text:
+          name: "Optie-naam: Feed-in Priority + TOU"
+          description: >-
+            Nodig om de accu daadwerkelijk MEER dan het huisverbruik te laten verkopen. "Feed-in
+            Priority" alleen dekt bij Solis vaak alleen het huisverbruik/PV-overschot; deze + TOU-variant
+            forceert echt extra ontladen naar het net, mits het tijdvenster hieronder actief is.
+          default: "Feed-in Priority + TOU"
+          selector:
+            text:
+        battery_soc_sensor:
+          name: "Sensor: Battery SoC"
+          default: "sensor.pv_omvormer_battery_soc"
+          selector:
+            entity:
+              domain: sensor
+              device_class: battery
+        target_soc_number:
+          name: "Entity: Target SoC"
+          default: "number.pv_omvormer_force_charge_soc"
+          selector:
+            entity:
+              domain: number
+    frank_sensoren:
+      name: "Frank Energie: Prijssensoren"
+      icon: mdi:currency-eur
+      collapsed: false
+      input:
+        frank_price_sensor:
+          name: "Sensor: Frank Energy Huidige Prijs (EUR/kWh)"
+          description: >-
+            Gebruik sensor.frank_current_price van de 'Frank Quarter Prices' integratie. NIET
+            sensor.frank_prices_today gebruiken: die geeft het AANTAL prijsblokken terug (bv. 96), geen prijs.
+          default: "sensor.frank_current_price"
+          selector:
+            entity:
+              domain: sensor
+        frank_prices_today_sensor:
+          name: "Sensor: Frank Prijzen Vandaag (met 'prices' attribuut)"
+          description: "sensor.frank_prices_today - bevat de volledige kwartierreeks van vandaag in het 'prices'-attribuut."
+          default: "sensor.frank_prices_today"
+          selector:
+            entity:
+              domain: sensor
+        frank_prices_tomorrow_sensor:
+          name: "Sensor: Frank Prijzen Morgen (met 'prices' attribuut) [OPTIONEEL]"
+          description: >-
+            sensor.frank_prices_tomorrow - is 's ochtends en vroeg in de middag 'unavailable' totdat Frank de
+            prijzen publiceert (meestal tussen 13:00-14:00). Dat is normaal en de automation vangt dit op.
+          default: "sensor.frank_prices_tomorrow"
+          selector:
+            entity:
+              domain: sensor
+        frank_return_price_sensor:
+          name: "Sensor: Frank Energy Terugleverprijs [OPTIONEEL]"
+          description: >-
+            sensor.frank_current_return_price - de kale marktprijs (zonder belasting) wordt gelezen uit het
+            'market_price'-attribuut van deze sensor. Wordt gebruikt om negatieve marktprijzen te detecteren
+            (Offgrid/Backflow-blok).
+          default: "sensor.frank_current_return_price"
+          selector:
+            entity:
+              domain: sensor
+        last_price_helper:
+          name: "Helper: Last Purchase Price"
+          default: "input_number.laatste_laadprijs"
+          selector:
+            entity:
+              domain: input_number
+    zone_modus:
+      name: "Frank Energie: Zone-modus [OPTIONEEL]"
+      icon: mdi:timeline-clock
+      collapsed: true
+      input:
+        frank_cheap_period_sensor:
+          name: "Binary Sensor: Frank Cheap Period (Zone-modus) [OPTIONEEL]"
+          description: >-
+            binary_sensor.frank_cheap_period - staat 'on' zolang we nu in de goedkope prijszone van vandaag zitten.
+            Laat leeg om Zone-modus uit te schakelen.
+          default: "binary_sensor.frank_cheap_period"
+          selector:
+            entity:
+              domain: binary_sensor
+        frank_expensive_period_sensor:
+          name: "Binary Sensor: Frank Expensive Period (Zone-modus) [OPTIONEEL]"
+          description: >-
+            binary_sensor.frank_expensive_period - staat 'on' zolang we nu in de dure prijszone van vandaag zitten.
+            Laat leeg om Zone-modus uit te schakelen.
+          default: "binary_sensor.frank_expensive_period"
+          selector:
+            entity:
+              domain: binary_sensor
+        frank_cheap_zone_end_sensor:
+          name: "Sensor: Frank Cheap Zone Einde [OPTIONEEL]"
+          description: >-
+            sensor.frank_cheap_zone_end_today - tijdstip waarop de goedkope zone vandaag eindigt. Nodig om te
+            berekenen wanneer geforceerd netladen ten laatste moet starten. Laat leeg om altijd meteen bij het
+            begin van de zone vol vermogen te laden.
+          default: "sensor.frank_cheap_zone_end_today"
+          selector:
+            entity:
+              domain: sensor
+
+    solis_discharge_tou:
+      name: "Solis: Geforceerd Verkopen (TOU-tijdvenster) [OPTIONEEL]"
+      icon: mdi:transmission-tower-export
+      collapsed: true
+      input:
+        discharge_slot_start_entity:
+          name: "Time: Discharge Slot 1 Start [OPTIONEEL]"
+          description: >-
+            time.pv_omvormer_time_charging_discharge_start_slot_1. Bij Solis werkt "Feed-in Priority"
+            vaak alleen tot maximaal het huisverbruik — om de accu écht méér dan dat te laten verkopen
+            is een actief TOU-ontlaadvenster nodig. De automation schuift dit venster elke cyclus
+            (~5 min) op naar 'nu tot over 10 minuten' zolang er verkocht moet worden. Laat beide
+            slot-velden leeg als je dit niet nodig hebt (dan wordt alleen "Feed-in Priority" gebruikt,
+            zonder TOU — verkoopt dan mogelijk niet boven je huisverbruik uit).
+          default: "time.pv_omvormer_time_charging_discharge_start_slot_1"
+          selector:
+            entity:
+              domain: time
+        discharge_slot_end_entity:
+          name: "Time: Discharge Slot 1 Einde [OPTIONEEL]"
+          description: "time.pv_omvormer_time_charging_discharge_end_slot_1"
+          default: "time.pv_omvormer_time_charging_discharge_end_slot_1"
+          selector:
+            entity:
+              domain: time
+
+    zon_belasting:
+      name: "Zon- & Belastingprofiel"
+      icon: mdi:weather-sunny
+      collapsed: false
+      input:
+        sun_entity:
+          name: "Sensor: Sun"
+          default: "sun.sun"
+          selector:
+            entity:
+              domain: sun
+        solar_forecast_today:
+          name: "Sensor: Solar Forecast Today"
+          default: "sensor.energy_production_today"
+          selector:
+            entity:
+              domain: sensor
+        solar_forecast_tomorrow:
+          name: "Sensor: Solar Forecast Tomorrow"
+          default: "sensor.energy_production_tomorrow"
+          selector:
+            entity:
+              domain: sensor
+        solar_forecast_remaining_today:
+          name: "Sensor: Solar Forecast Remaining Today (kWh) [OPTIONEEL]"
+          default: "sensor.energy_production_today_remaining"
+          selector:
+            entity:
+              domain: sensor
+        p1_power_sensor:
+          name: "Sensor: P1 Grid Import (Watt) [OPTIONEEL]"
+          description: >-
+            Een sensor die aangeeft hoeveel vermogen je NU van het net afneemt (positief = je haalt
+            stroom van het net; bij teruglevering mag dit 0 of negatief zijn). Dit wordt alleen gebruikt
+            om de inkoopprijs-boekhouding nauwkeuriger te maken: als tijdens het laden een deel van het
+            vermogen van eigen zon komt en een deel van het net, wordt alleen het net-deel meegeteld
+            tegen de huidige prijs.
+
+            Waar vind je 'm? Zoek in Ontwikkelaarshulpmiddelen → Statussen op 'p1', 'grid' of 'vermogen'.
+            Veelvoorkomende bronnen: een aparte P1-uitleesmodule (bv. HomeWizard P1 Meter, Slimmelezer,
+            DSMR-integratie) geeft meestal iets als sensor.p1_meter_active_power_w of
+            sensor.slimme_meter_huidig_verbruik. Heb je zo'n aparte P1-uitlezer niet, dan kun je als
+            benadering ook de eigen netmeting van je omvormer gebruiken (bv.
+            sensor.pv_omvormer_ac_grid_port_power) — check dan wel of positief bij jou ook echt
+            'importeren van het net' betekent en niet andersom.
+
+            Volledig optioneel: laat dit leeg en de automation rekent dan simpelweg de volle huidige
+            prijs als inkoopprijs zodra er geforceerd wordt geladen — iets minder precies bij gedeeltelijk
+            zon-laden, maar werkt prima.
+          default: "sensor.kwh_meter_vermogen"
+          selector:
+            entity:
+              domain: sensor
+              device_class: power
+        battery_power_sensor:
+          name: "Sensor: Battery Charging Power (Watt) [OPTIONEEL]"
+          description: >-
+            Het huidige laad/ontlaadvermogen van de accu zelf (bv. sensor.pv_omvormer_battery_power, of
+            als je losse laad/ontlaad-sensoren hebt zoals eerder besproken: gebruik dan de laad-sensor).
+            Wordt samen met de P1-sensor hierboven gebruikt om te bepalen welk deel van het laden uit
+            het net kwam. Ook optioneel — zelfde fallback-gedrag als hierboven als je 'm leeg laat.
+          default: "sensor.pv_omvormer_battery_charge_power"
+          selector:
+            entity:
+              domain: sensor
+              device_class: power
+
+        sensor_load_night:
+          name: "Sensor: Night Load (kW) [OPTIONEEL]"
+          default: []
+          selector:
+            entity:
+              domain: ["sensor", "input_number"]
+        fallback_load_night:
+          name: "Fallback: Night Load (00:00 - 06:00) in kW"
+          default: 0.3
+          selector:
+            number:
+              min: 0.0
+              max: 10.0
+              step: 0.1
+
+        sensor_load_morning:
+          name: "Sensor: Morning Load (kW) [OPTIONEEL]"
+          default: []
+          selector:
+            entity:
+              domain: ["sensor", "input_number"]
+        fallback_load_morning:
+          name: "Fallback: Morning Load (06:00 - 09:00) in kW"
+          default: 1.5
+          selector:
+            number:
+              min: 0.0
+              max: 10.0
+              step: 0.1
+
+        sensor_load_day:
+          name: "Sensor: Day Load (kW) [OPTIONEEL]"
+          default: []
+          selector:
+            entity:
+              domain: ["sensor", "input_number"]
+        fallback_load_day:
+          name: "Fallback: Day Load (09:00 - 17:00) in kW"
+          default: 0.5
+          selector:
+            number:
+              min: 0.0
+              max: 10.0
+              step: 0.1
+
+        sensor_load_evening:
+          name: "Sensor: Evening Load (kW) [OPTIONEEL]"
+          default: []
+          selector:
+            entity:
+              domain: ["sensor", "input_number"]
+        fallback_load_evening:
+          name: "Fallback: Evening Load (17:00 - 00:00) in kW"
+          default: 2.0
+          selector:
+            number:
+              min: 0.0
+              max: 10.0
+              step: 0.1
+
+    strategie:
+      name: "Strategie-parameters"
+      icon: mdi:tune
+      collapsed: false
+      input:
+        battery_capacity_kwh:
+          name: "Battery Capacity (kWh)"
+          default: 16
+          selector:
+            number:
+              min: 1
+              max: 100
+              step: 0.1
+        charge_power_kw:
+          name: "Charge Speed (kW)"
+          default: 3.6
+          selector:
+            number:
+              min: 0.1
+              max: 22
+              step: 0.1
+        safety_factor:
+          name: "BMS Safety Factor"
+          default: 1.5
+          selector:
+            number:
+              min: 1.0
+              max: 4.0
+              step: 0.1
+        max_price_cap_helper:
+          name: "Helper: Absolute Max Price (EUR)"
+          description: >-
+            input_number-helper (bv. min 0, max 2.0, step 0.01, default 0.35). Zo kun je dit dashboard-
+            aanpasbaar maken; zie de dashboard-uitleg voor hoe je zo'n helper aanmaakt.
+          default: "input_number.max_price_cap"
+          selector:
+            entity:
+              domain: input_number
+
+        profit_lock_step:
+          name: "Smart Hold: Profit Lock Step (%)"
+          default: 5
+          selector:
+            number:
+              min: 1
+              max: 20
+              unit_of_measurement: "%"
+        morning_survival_soc_helper:
+          name: "Helper: Morning Survival Target (%)"
+          description: "input_number-helper (bv. min 10, max 80, step 1, default 35)."
+          default: "input_number.morning_survival_target"
+          selector:
+            entity:
+              domain: input_number
+        peak_hours_count:
+          name: "Peak Analysis Window"
+          default: 3
+          selector:
+            number:
+              min: 1
+              max: 6
+        buffer_discount_percentage_helper:
+          name: "Helper: Opportunistische Laaddrempel (% onder piekprijs)"
+          description: >-
+            input_number-helper (bv. min 10, max 90, step 1, default 40). Naast het strikte 'ik heb dit
+            echt nodig'-laadmoment mag de accu OOK laden zodra de prijs minstens dit percentage lager
+            ligt dan de gemiddelde piekprijs van de komende uren. Bij 40%: als de piekprijs €0,50 is,
+            mag er al geladen worden zodra de prijs onder €0,30 zakt, ook al is dat niet strikt
+            noodzakelijk om je doel-SoC te halen. Hoger percentage = terughoudender (alleen bij een
+            grote dip); lager percentage = de accu pakt sneller elke relatief goedkope prijs mee.
+          default: "input_number.buffer_discount_percentage"
+          selector:
+            entity:
+              domain: input_number
+        min_discharge_margin_helper:
+          name: "Helper: Minimale Verkoopmarge boven Inkoopprijs (%)"
+          description: >-
+            input_number-helper (bv. min 0, max 100, step 1, default 20). De accu begint pas te
+            verkopen/ontladen zodra de huidige prijs minstens dit percentage HOGER ligt dan wat je
+            gemiddeld voor die stroom hebt betaald. Bij 20%: heb je gemiddeld €0,20/kWh betaald, dan
+            verkoopt de accu pas vanaf €0,24/kWh. Hoger percentage = wachten op een grotere winstmarge
+            voor je verkoopt; lager percentage = sneller (met minder marge) verkopen.
+          default: "input_number.min_discharge_margin"
+          selector:
+            entity:
+              domain: input_number
+
+        min_base_soc_helper:
+          name: "Helper: Absolute Minimum SoC (%)"
+          description: "input_number-helper (bv. min 0, max 100, step 1, default 15)."
+          default: "input_number.min_base_soc"
+          selector:
+            entity:
+              domain: input_number
+
+        target_soc_winter_helper:
+          name: "Helper: Target SoC (Winter)"
+          description: "input_number-helper (bv. min 10, max 100, step 1, default 90)."
+          default: "input_number.target_soc_winter"
+          selector:
+            entity:
+              domain: input_number
+        target_soc_summer_helper:
+          name: "Helper: Target SoC (Summer)"
+          description: "input_number-helper (bv. min 10, max 100, step 1, default 30)."
+          default: "input_number.target_soc_summer"
+          selector:
+            entity:
+              domain: input_number
+        summer_solar_threshold:
+          name: "Summer Solar Threshold (kWh)"
+          default: 8
+          selector:
+            number:
+              min: 0
+              max: 100
+
+    net_backflow:
+      name: "Net & Terug levering [OPTIONEEL]"
+      icon: mdi:transmission-tower
+      collapsed: true
+      input:
+        offgrid_switch:
+          name: "Switch: Offgrid Mode [OPTIONEEL]"
+          default: []
+          selector:
+            entity:
+              domain: switch
+        backflow_power_entity:
+          name: "Entity: Backflow Power Limit (Watt) [OPTIONEEL]"
+          default: []
+          selector:
+            entity:
+              domain: number
+        normal_backflow_limit:
+          name: "Normal Backflow Limit (Watt)"
+          default: 5000
+          selector:
+            number:
+              min: 0
+              max: 20000
+              step: 100
+
+    handmatig:
+      name: "Handmatige Bediening [OPTIONEEL]"
+      icon: mdi:hand-back-right
+      collapsed: true
+      input:
+        boost_switch:
+          name: "Switch: Manual Boost"
+          default: "input_boolean.battery_boost"
+          selector:
+            entity:
+              domain: input_boolean
+        disable_bypass_switch:
+          name: "Switch: Disable Solar Bypass (Force Sun Charge) [OPTIONEEL]"
+          default: "input_boolean.forceer_zon_laden"
+          selector:
+            entity:
+              domain: ["input_boolean", "switch"]
+    notificaties_taal:
+      name: "Notificaties & Taal"
+      icon: mdi:bell-outline
+      collapsed: false
+      input:
+        language:
+          name: "Language / Taal"
+          default: "nl"
+          selector:
+            select:
+              options:
+                - label: "English"
+                  value: "en"
+                - label: "Nederlands"
+                  value: "nl"
+        notify_device:
+          name: "Notification Device"
+          default: "0704c51cc459c03006134a1a21b12e0d"
+          selector:
+            device:
+              integration: mobile_app
+        report_time_evening:
+          name: "Report Time (Evening)"
+          default: "21:30:00"
+          selector:
+            time:
+        report_time_morning:
+          name: "Report Time (Morning)"
+          default: "08:00:00"
+          selector:
+            time:
+        notify_report_toggle:
+          name: "Schakelaar: Dagelijks Rapport aan/uit [OPTIONEEL]"
+          description: >-
+            input_boolean-helper. Staat 'on' (of leeg gelaten) → je krijgt het ochtend/avond-rapport.
+            Staat 'off' → geen rapport-meldingen, wel alle andere meldingen gewoon.
+          default: "input_boolean.notify_report_toggle"
+          selector:
+            entity:
+              domain: input_boolean
+        notify_strategy_toggle:
+          name: "Schakelaar: Strategie-meldingen aan/uit [OPTIONEEL]"
+          description: >-
+            input_boolean-helper. Regelt alle "Start Laden/Ontladen", Solar Bypass, Smart Hold en Zone-
+            gebeurtenis-meldingen. Staat 'on' (of leeg gelaten) → je krijgt ze. Staat 'off' → stil, op
+            Noodladen na (dat blijft altijd gemeld, veiligheidsreden).
+          default: "input_boolean.notify_strategy_toggle"
+          selector:
+            entity:
+              domain: input_boolean
+
+    debug_log:
+      name: "Debug & Logging [OPTIONEEL]"
+      icon: mdi:text-box-search-outline
+      collapsed: true
+      input:
+        status_log_helper:
+          name: "Helper: Automation Status [OPTIONEEL]"
+          description: >-
+            input_text-helper (max lengte gerust op 50 laten). De automation schrijft hier bij elke
+            beslissing een kort statuswoord naartoe (bv. 'Laden', 'Wachten', 'Zone-Net', 'Idle'), zodat
+            je op het dashboard kunt zien in welke staat hij nu zit. Gecombineerd met een Logbook-kaart
+            op het dashboard krijg je er gratis een geschiedenis bij (Home Assistant houdt bij wanneer
+            een entity van waarde verandert). Laat leeg om dit uit te schakelen.
+          default: "input_text.automation_status_log"
+          selector:
+            entity:
+              domain: input_text
+
+trigger_variables:
+  boost_entity: !input boost_switch
+  cheap_zone_entity: !input frank_cheap_period_sensor
+  expensive_zone_entity: !input frank_expensive_period_sensor
+
+trigger:
+  - platform: time_pattern
+    minutes: "/5"
+    id: "timer"
+  - platform: time
+    at: !input report_time_evening
+    id: "report"
+  - platform: time
+    at: !input report_time_morning
+    id: "report"
+  - platform: state
+    entity_id: !input frank_price_sensor
+    id: "price_change"
+  - platform: state
+    entity_id: !input battery_soc_sensor
+    id: "soc_change"
+  - platform: template
+    value_template: "{{ boost_entity != [] and is_state(boost_entity, 'on') }}"
+    id: "boost"
+  - platform: template
+    value_template: >-
+      {{ (cheap_zone_entity != [] and is_state(cheap_zone_entity, 'on')) ~ '|' ~
+         (expensive_zone_entity != [] and is_state(expensive_zone_entity, 'on')) }}
+    id: "zone_change"
+
+action:
+  - condition: template
+    value_template: >-
+      {% if trigger is defined and trigger.platform == 'state' %}
+        {{ trigger.to_state.state != trigger.from_state.state }}
+      {% else %}
+        true
+      {% endif %}
+
+  - variables:
+      language: !input language
+      conf_soc_sensor: !input battery_soc_sensor
+      conf_price_sensor: !input frank_price_sensor
+      conf_prices_today: !input frank_prices_today_sensor
+      conf_prices_tomorrow: !input frank_prices_tomorrow_sensor
+      conf_cheap_period: !input frank_cheap_period_sensor
+      conf_expensive_period: !input frank_expensive_period_sensor
+      conf_cheap_zone_end: !input frank_cheap_zone_end_sensor
+      conf_last_price: !input last_price_helper
+      conf_boost: !input boost_switch
+      conf_disable_bypass: !input disable_bypass_switch
+      conf_notify: !input notify_device
+      conf_notify_report_toggle: !input notify_report_toggle
+      conf_notify_strategy_toggle: !input notify_strategy_toggle
+      conf_status_log: !input status_log_helper
+      conf_target_num: !input target_soc_number
+      conf_work_mode: !input work_mode_select
+      mode_self_use: !input mode_self_use_text
+      mode_self_use_tou: !input mode_self_use_tou_text
+      mode_feed_in: !input mode_feed_in_text
+      mode_reserve: !input mode_reserve_text
+      mode_feed_in_tou: !input mode_feed_in_tou_text
+      conf_discharge_slot_start: !input discharge_slot_start_entity
+      conf_discharge_slot_end: !input discharge_slot_end_entity
+      conf_sun: !input sun_entity
+      conf_p1: !input p1_power_sensor
+      conf_bat_pow: !input battery_power_sensor
+      conf_return_price: !input frank_return_price_sensor
+      conf_offgrid: !input offgrid_switch
+      conf_backflow: !input backflow_power_entity
+      p_normal_backflow: !input normal_backflow_limit
+      conf_solar_rem: !input solar_forecast_remaining_today
+      conf_load_night: !input sensor_load_night
+      fallback_night: !input fallback_load_night
+      conf_load_morning: !input sensor_load_morning
+      fallback_morning: !input fallback_load_morning
+      conf_load_day: !input sensor_load_day
+      fallback_day: !input fallback_load_day
+      conf_load_evening: !input sensor_load_evening
+      fallback_evening: !input fallback_load_evening
+      p_lock_step: !input profit_lock_step
+      conf_morning_soc_helper: !input morning_survival_soc_helper
+      p_peak_count: !input peak_hours_count
+      conf_buffer_disc_helper: !input buffer_discount_percentage_helper
+      conf_min_discharge_helper: !input min_discharge_margin_helper
+      p_bat_cap: !input battery_capacity_kwh
+      p_charge_kw: !input charge_power_kw
+      p_safety: !input safety_factor
+      conf_max_price_cap_helper: !input max_price_cap_helper
+      conf_min_base_soc_helper: !input min_base_soc_helper
+      conf_target_winter_helper: !input target_soc_winter_helper
+      conf_target_summer_helper: !input target_soc_summer_helper
+      t_solar_th: !input summer_solar_threshold
+      s_sol_today: !input solar_forecast_today
+      s_sol_tom: !input solar_forecast_tomorrow
+
+  - variables:
+      current_soc: "{{ states(conf_soc_sensor) | float(0) }}"
+      last_paid_price: "{{ states(conf_last_price) | float(0) }}"
+      is_boost_active: "{{ conf_boost != [] and is_state(conf_boost, 'on') }}"
+      has_notify_device: "{{ conf_notify != [] }}"
+      notify_report_enabled: >-
+        {{ has_notify_device and (conf_notify_report_toggle == [] or is_state(conf_notify_report_toggle, 'on')) }}
+      notify_strategy_enabled: >-
+        {{ has_notify_device and (conf_notify_strategy_toggle == [] or is_state(conf_notify_strategy_toggle, 'on')) }}
+      now_ts: "{{ as_timestamp(now()) }}"
+      is_daytime: "{{ is_state(conf_sun, 'above_horizon') }}"
+      raw_price_state: "{{ states(conf_price_sensor) }}"
+      current_work_mode: "{{ states(conf_work_mode) }}"
+      is_force_charging: "{{ current_work_mode == mode_self_use_tou }}"
+      reserve_like_active: "{{ current_work_mode in [mode_self_use_tou, mode_reserve] }}"
+      discharge_slot_start_str: "{{ now().strftime('%H:%M:%S') }}"
+      discharge_slot_end_str: "{{ (now() + timedelta(minutes=10)).strftime('%H:%M:%S') }}"
+      current_price: >-
+        {% if raw_price_state in ['unknown', 'unavailable', 'none'] %}
+          {{ last_paid_price | float(0) }}
+        {% else %}
+          {{ raw_price_state | float(last_paid_price | float(0)) }}
+        {% endif %}
+      current_raw_price: >-
+        {% set mp = state_attr(conf_return_price, 'market_price') if conf_return_price != [] else none %}
+        {% if mp is not none %}
+          {{ mp | float(0.0) }}
+        {% else %}
+          0.0
+        {% endif %}
+      is_zero_export_window: >-
+        {% if conf_return_price != [] %}
+          {{ (current_raw_price | float(0)) < 0.0 and (current_price | float(0)) >= 0.0 }}
+        {% else %}
+          False
+        {% endif %}
+      is_cheap_zone: "{{ conf_cheap_period != [] and is_state(conf_cheap_period, 'on') }}"
+      is_expensive_zone: "{{ conf_expensive_period != [] and is_state(conf_expensive_period, 'on') }}"
+      is_bypass_disabled: >-
+        {% if conf_disable_bypass != [] and is_state(conf_disable_bypass, 'on') and (current_soc | float(0)) < 95 %}
+          True
+        {% else %}
+          False
+        {% endif %}
+      val_night: >-
+        {% if conf_load_night != [] and states(conf_load_night) not in ['unknown', 'unavailable', 'none'] %}
+          {{ states(conf_load_night) | float(0) }}
+        {% else %}
+          {{ fallback_night | float(0) }}
+        {% endif %}
+      val_morning: >-
+        {% if conf_load_morning != [] and states(conf_load_morning) not in ['unknown', 'unavailable', 'none'] %}
+          {{ states(conf_load_morning) | float(0) }}
+        {% else %}
+          {{ fallback_morning | float(0) }}
+        {% endif %}
+      val_day: >-
+        {% if conf_load_day != [] and states(conf_load_day) not in ['unknown', 'unavailable', 'none'] %}
+          {{ states(conf_load_day) | float(0) }}
+        {% else %}
+          {{ fallback_day | float(0) }}
+        {% endif %}
+      val_evening: >-
+        {% if conf_load_evening != [] and states(conf_load_evening) not in ['unknown', 'unavailable', 'none'] %}
+          {{ states(conf_load_evening) | float(0) }}
+        {% else %}
+          {{ fallback_evening | float(0) }}
+        {% endif %}
+      current_load_kw: >-
+        {% set h = now().hour %}
+        {% if h < 6 %} {{ val_night | float(0) }}
+        {% elif h < 9 %} {{ val_morning | float(0) }}
+        {% elif h < 17 %} {{ val_day | float(0) }}
+        {% else %} {{ val_evening | float(0) }}
+        {% endif %}
+      p_morning_soc: "{{ states(conf_morning_soc_helper) | float(35) }}"
+      p_buffer_disc: "{{ states(conf_buffer_disc_helper) | float(40) }}"
+      p_min_discharge: "{{ states(conf_min_discharge_helper) | float(20) }}"
+      p_max_cap: "{{ states(conf_max_price_cap_helper) | float(0.35) }}"
+      p_min_base_soc: "{{ states(conf_min_base_soc_helper) | float(15) }}"
+      t_winter: "{{ states(conf_target_winter_helper) | float(90) }}"
+      t_summer: "{{ states(conf_target_summer_helper) | float(30) }}"
+
+  - variables:
+      current_charging_cost: >-
+        {% if conf_p1 != [] and conf_bat_pow != [] %}
+          {% set grid_w = states(conf_p1) | float(0) %}
+          {% set bat_w = states(conf_bat_pow) | float(0) %}
+          {% if bat_w > 10 %}
+            {% set grid_import = [grid_w, 0] | max %}
+            {% set ratio = [(grid_import / bat_w), 1.0] | min %}
+            {{ (current_price | float(0)) * ratio }}
+          {% else %}
+            {{ current_price | float(0) if is_force_charging else 0.0 }}
+          {% endif %}
+        {% else %}
+          {{ current_price | float(0) if is_force_charging else 0.0 }}
+        {% endif %}
+
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: "soc_change"
+          - condition: template
+            value_template: "{{ trigger.to_state.state | float(0) > trigger.from_state.state | float(0) }}"
+        sequence:
+          - service: input_number.set_value
+            target: {entity_id: !input last_price_helper}
+            data:
+              value: >-
+                {% set old_soc = trigger.from_state.state | float(0) %}
+                {% set new_soc = trigger.to_state.state | float(0) %}
+                {% set diff = new_soc - old_soc %}
+                {% set old_price = last_paid_price | float(0) %}
+                {% set cost = current_charging_cost | float(current_price | float(0)) %}
+                {% if not is_daytime and cost == 0 %}
+                  {{ old_price }}
+                {% else %}
+                  {% if new_soc > 0 %}
+                    {{ (((old_soc * old_price) + (diff * cost)) / new_soc) | round(4) }}
+                  {% else %}
+                    {{ old_price }}
+                  {% endif %}
+                {% endif %}
+          - stop: "Prijs succesvol geupdate via SOC stijging."
+
+  - variables:
+      raw_today: "{{ state_attr(conf_prices_today, 'prices') }}"
+      raw_tomorrow: >-
+        {{ state_attr(conf_prices_tomorrow, 'prices') if conf_prices_tomorrow != [] else [] }}
+      prices_json: >-
+        {% set ns = namespace(items=[]) %}
+        {% for item in (raw_today or []) %}
+          {% set ts_val = as_timestamp(item.from, 0) %}
+          {% if ts_val %}
+            {% set ns.items = ns.items + [{
+              "local_hour": item.from[11:13] | int(0),
+              "day_str": "Vandaag",
+              "ts": ts_val,
+              "price": item.total_price_eur_kwh | float(0)
+            }] %}
+          {% endif %}
+        {% endfor %}
+        {% for item in (raw_tomorrow or []) %}
+          {% set ts_val = as_timestamp(item.from, 0) %}
+          {% if ts_val %}
+            {% set ns.items = ns.items + [{
+              "local_hour": item.from[11:13] | int(0),
+              "day_str": "Morgen",
+              "ts": ts_val,
+              "price": item.total_price_eur_kwh | float(0)
+            }] %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.items }}
+
+  - variables:
+      filtered_data: >-
+        {% set output = namespace(all_prices=[], future_slots=[], charge_prices=[], discharge_prices=[]) %}
+        {% set history_cutoff = now_ts - 3600 %}
+        {% set charge_lookahead = now_ts + (12 * 3600) %}
+        {% set discharge_lookahead = now_ts + (8 * 3600) %}
+        {% if prices_json %}
+          {% for item in prices_json %}
+            {% if item.ts >= history_cutoff %}
+              {% set output.all_prices = output.all_prices + [item.price] %}
+              {% set output.future_slots = output.future_slots + [item] %}
+              {% if item.ts <= charge_lookahead %}
+                {% set output.charge_prices = output.charge_prices + [item.price] %}
+              {% endif %}
+              {% if item.ts <= discharge_lookahead %}
+                {% set output.discharge_prices = output.discharge_prices + [item.price] %}
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+        {% set pk_count = p_peak_count | int %}
+        {% set sorted_charge = output.charge_prices | sort(reverse=True) %}
+        {% set rolling_peak = 0.0 %}
+        {% if sorted_charge | length > 0 %}
+          {% set count = [sorted_charge|length, pk_count] | min %}
+          {% set rolling_peak = (sorted_charge[:count] | sum / count) | float(0) %}
+        {% endif %}
+        {"all": {{ output.all_prices }}, "slots": {{ output.future_slots }}, "peak": {{ rolling_peak }}, "discharge_term": {{ output.discharge_prices }} }
+
+  - variables:
+      sorted_all: "{{ filtered_data.all | sort }}"
+      relevant_peak_price: "{{ filtered_data.peak | float(0) }}"
+      buffer_limit: "{{ (relevant_peak_price | float(0)) * (1 - ((p_buffer_disc | float(0)) / 100)) }}"
+      forecast_tomorrow_val: "{{ states(s_sol_tom) | float(0) }}"
+      relevant_solar: >-
+        {% if now().hour >= 14 %} {{ forecast_tomorrow_val | float(0) }}
+        {% else %} {{ states(s_sol_today) | float(0) }}
+        {% endif %}
+      dynamic_target_soc: >-
+        {% if (relevant_solar | float(0)) > (t_solar_th | float(0)) %} {{ t_summer | float(0) }}
+        {% else %} {{ t_winter | float(0) }}
+        {% endif %}
+
+      effective_solar_rem: >-
+        {% if conf_solar_rem != [] and states(conf_solar_rem) not in ['unknown', 'unavailable', 'none'] %}
+          {% set raw_solar = states(conf_solar_rem) | float(0) %}
+          {% set h = now().hour %}
+          {% set sunset_hour = 20 %}
+          {% set ns = namespace(solar_load=0.0) %}
+          {% for i in range(h, sunset_hour) %}
+            {% if i < 6 %} {% set ns.solar_load = ns.solar_load + (val_night | float(0)) %}
+            {% elif i < 9 %} {% set ns.solar_load = ns.solar_load + (val_morning | float(0)) %}
+            {% elif i < 17 %} {% set ns.solar_load = ns.solar_load + (val_day | float(0)) %}
+            {% else %} {% set ns.solar_load = ns.solar_load + (val_evening | float(0)) %}
+            {% endif %}
+          {% endfor %}
+          {{ [raw_solar - ns.solar_load, 0.0] | max }}
+        {% else %}
+          0.0
+        {% endif %}
+
+      solar_charging_override: >-
+        {% set virtual_soc_solar = current_soc | float(0) %}
+        {% if not reserve_like_active %}
+          {% set virtual_soc_solar = (current_soc | float(0)) + 3.0 %}
+        {% endif %}
+        {% set deficit = (dynamic_target_soc | float(0)) - virtual_soc_solar %}
+        {% if deficit > 0 %}
+          {% set kwh_needed = (deficit / 100.0) * (p_bat_cap | float(0)) %}
+          {{ (effective_solar_rem | float(0)) >= kwh_needed and (current_price | float(0)) >= 0.0 }}
+        {% else %}
+          True
+        {% endif %}
+
+      zone_charge_deficit_kwh: >-
+        {{ (((100 - (current_soc|float(0))) / 100.0) * (p_bat_cap|float(0))) | round(3) }}
+
+      zone_charge_net_kwh_needed: >-
+        {{ [ (zone_charge_deficit_kwh|float(0)) - (effective_solar_rem|float(0)), 0.0 ] | max | round(3) }}
+
+      zone_charge_hours_needed: >-
+        {% set net = zone_charge_net_kwh_needed | float(0) %}
+        {% if net <= 0 %}
+          0.0
+        {% else %}
+          {{ (net / (p_charge_kw | float(3.0)) * (p_safety | float(1.0))) | round(2) }}
+        {% endif %}
+
+      zone_cheap_end_ts: >-
+        {% if conf_cheap_zone_end != [] and states(conf_cheap_zone_end) not in ['unknown', 'unavailable', 'none'] %}
+          {{ as_timestamp(states(conf_cheap_zone_end), 0) }}
+        {% else %}
+          0
+        {% endif %}
+
+      zone_charge_should_start_now: >-
+        {% if (zone_cheap_end_ts | float(0)) <= 0 %}
+          true
+        {% else %}
+          {{ (now_ts + ((zone_charge_hours_needed|float(0)) * 3600)) >= (zone_cheap_end_ts|float(0)) }}
+        {% endif %}
+
+      zone_discharge_sellable_kwh: >-
+        {{ ([ ((current_soc|float(0)) - (p_morning_soc|float(0))) / 100.0 * (p_bat_cap|float(0)), 0.0 ] | max) | round(3) }}
+
+      zone_discharge_floor_reached: >-
+        {{ (current_soc | float(0)) <= ((p_morning_soc | float(0)) + 1) }}
+
+      morning_survival_limit: >-
+        {% set current_h = now().hour %}
+        {% if current_h < 6 or current_h >= 21 %}
+          {% set survival_target = p_morning_soc | float(0) %}
+          {% set is_active_morning = is_force_charging and (states(conf_target_num)|float(0) == survival_target) %}
+          {% set threshold = survival_target if is_active_morning else (survival_target - 2) %}
+          {% if (current_soc | float(0)) < threshold %}
+            {% set deficit = survival_target - (current_soc | float(0)) %}
+            {% set kwh_needed = (deficit / 100.0) * (p_bat_cap | float(0)) %}
+            {% set hours_needed = (kwh_needed / (p_charge_kw | float(3.0)) * (p_safety | float(1.0))) | round(0, 'ceil') | int %}
+            {% set hours_needed = [hours_needed, 1] | max %}
+            {% set today_date = now().strftime('%Y-%m-%d') %}
+            {% set today_6am = as_timestamp(today_date ~ ' 06:00:00') %}
+            {% set target_6am = (today_6am + 86400) if current_h >= 6 else today_6am %}
+            {% set ns = namespace(prices=[]) %}
+            {% for item in filtered_data.slots %}
+              {% if item.ts < target_6am %}
+                {% set ns.prices = ns.prices + [item.price | float(0)] %}
+              {% endif %}
+            {% endfor %}
+            {% set sorted_night = ns.prices | sort %}
+            {% if sorted_night | length > 0 %}
+              {% set idx = (hours_needed - 1) if (hours_needed - 1) < sorted_night|length else (sorted_night|length - 1) %}
+              {{ sorted_night[idx] }}
+            {% else %} -999.0 {% endif %}
+          {% else %} -999.0 {% endif %}
+        {% else %} -999.0 {% endif %}
+
+      charge_limit_strict: >-
+        {% set deficit = (dynamic_target_soc | float(0)) - (current_soc | float(0)) %}
+        {% if deficit > 0 %}
+          {% set kwh_needed = (deficit / 100.0) * (p_bat_cap | float(0)) %}
+          {% set net_kwh_needed = kwh_needed - (effective_solar_rem | float(0)) %}
+          {% if net_kwh_needed > 0 %}
+            {% set hours_needed = (net_kwh_needed / (p_charge_kw | float(3.0)) * (p_safety | float(1.0))) | round(0, 'ceil') | int %}
+            {% set hours_needed = [hours_needed, 1] | max %}
+            {% if sorted_all | length > 0 %}
+              {% set idx = (hours_needed - 1) if (hours_needed - 1) < sorted_all|length else (sorted_all|length - 1) %}
+              {{ sorted_all[idx] }}
+            {% else %} -999.0 {% endif %}
+          {% else %} -999.0 {% endif %}
+        {% else %} -999.0 {% endif %}
+
+      active_target_soc: >-
+        {% set is_morning_charge = (morning_survival_limit | float(-999.0)) != -999.0 and ((current_price | float(0.0)) | round(3) <= (morning_survival_limit | float(0.0)) | round(3)) and ((current_soc | float(0.0)) < ((p_morning_soc | float(0.0)) - 0.1)) %}
+        {% set normal_strict = (charge_limit_strict | float(-999.0)) != -999.0 and ((current_price | float(0.0)) | round(3) <= (charge_limit_strict | float(0.0)) | round(3)) and not solar_charging_override %}
+        {% set normal_buffer = ((current_price | float(0.0)) | round(3) <= (buffer_limit | float(0.0)) | round(3)) and not solar_charging_override %}
+        {% if normal_strict or normal_buffer %}
+          {{ dynamic_target_soc | float(0) }}
+        {% elif is_morning_charge %}
+          {{ p_morning_soc | float(0) }}
+        {% else %}
+          {{ dynamic_target_soc | float(0) }}
+        {% endif %}
+
+      discharge_start_price: >-
+        {% set base_margin_price = (last_paid_price | float(0)) * (1 + ((p_min_discharge|float(0)) / 100)) %}
+        {% set virtual_soc = current_soc | float(0) %}
+        {% if not reserve_like_active and (current_soc | float(0)) > ((p_min_base_soc | float(0)) + 1) %}
+          {% set virtual_soc = (current_soc | float(0)) + 2.0 %}
+        {% endif %}
+        {% set usable_soc = virtual_soc - (p_min_base_soc | float(0)) %}
+        {% if usable_soc > 0 %}
+          {% set ns = namespace(hours_to_charge=8) %}
+          {% set limit_strict = charge_limit_strict | float(0) %}
+          {% set limit_buffer = buffer_limit | float(0) %}
+          {% for item in filtered_data.slots[:8] %}
+            {% if (item.price | float(0)) <= limit_strict or (item.price | float(0)) <= limit_buffer %}
+              {% if loop.index0 < ns.hours_to_charge %}
+                {% set ns.hours_to_charge = loop.index0 %}
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+          {% set horizon = [ns.hours_to_charge, 1] | max %}
+          {% set kwh_avail = (usable_soc / 100.0) * (p_bat_cap | float(0)) %}
+          {% set h = now().hour %}
+          {% set ns2 = namespace(rem=kwh_avail, hours=0) %}
+          {% for i in range(h, h + 24) %}
+            {% if ns2.rem > 0 %}
+              {% set hd = i % 24 %}
+              {% set load = (val_night | float(0)) if hd < 6 else ((val_morning | float(0)) if hd < 9 else ((val_day | float(0)) if hd < 17 else (val_evening | float(0)))) %}
+              {% set ns2.rem = ns2.rem - load %}
+              {% set ns2.hours = ns2.hours + 1 %}
+            {% endif %}
+          {% endfor %}
+          {% set hours_to_empty = [ns2.hours, 1] | max %}
+          {% set active_slots = filtered_data.slots[:horizon] | map(attribute='price') | list %}
+          {% set reverse_sorted = active_slots | sort(reverse=True) %}
+          {% set lookahead_len = reverse_sorted | length %}
+          {% if lookahead_len > 0 %}
+            {% set allowed_hours = [hours_to_empty, lookahead_len] | min %}
+            {% set optimal_price = reverse_sorted[allowed_hours - 1] | float(0) %}
+            {% set raw_discharge = [base_margin_price, optimal_price] | max %}
+          {% else %}
+            {% set raw_discharge = base_margin_price %}
+          {% endif %}
+        {% else %}
+          {% set raw_discharge = base_margin_price %}
+        {% endif %}
+        {% set active_charge_limit = [charge_limit_strict | float(-999.0), morning_survival_limit | float(-999.0)] | max %}
+        {% if active_charge_limit != -999.0 %}
+          {{ [raw_discharge, (active_charge_limit + 0.01)] | max | round(4) }}
+        {% else %}
+          {{ raw_discharge | round(4) }}
+        {% endif %}
+
+      feed_in_start_price: >-
+        {% set peak_bypass = (relevant_peak_price | float(0)) * 0.85 %}
+        {% set discharge_bypass = (discharge_start_price | float(0)) * 0.85 %}
+        {{ [peak_bypass, discharge_bypass] | max | round(3) }}
+
+  - if:
+      - condition: template
+        value_template: "{{ conf_disable_bypass != [] and is_state(conf_disable_bypass, 'on') and (current_soc | float(0)) >= 95 }}"
+    then:
+      - service: homeassistant.turn_off
+        target: {entity_id: !input disable_bypass_switch}
+      - if:
+          - condition: template
+            value_template: "{{ notify_strategy_enabled }}"
+        then:
+          - domain: mobile_app
+            type: notify
+            device_id: !input notify_device
+            message: "Batterij heeft 95% bereikt. Bypass-blokkade automatisch uitgeschakeld. Algoritme actief!"
+
+  - choose:
+      - alias: "1. Send Report"
+        conditions:
+          - condition: trigger
+            id: "report"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ notify_report_enabled }}"
+            then:
+              - domain: mobile_app
+                type: notify
+                device_id: !input notify_device
+                message: >-
+                  {% if language == 'nl' %}
+                    Dayround Status
+                    SoC: {{ current_soc }}% | Inkoop: EUR{{ last_paid_price | float(0) | round(3) }}
+                    Huidig: EUR{{ current_price | float(0) | round(3) }}
+                    Modus: {{ current_work_mode }}
+                    Drempels:
+                    Strikt: EUR{{ charge_limit_strict | float(0) | round(3) }}
+                    Morning: EUR{{ morning_survival_limit | float(0) | round(3) }}
+                    Feed-In Bypass: EUR{{ feed_in_start_price | float(0) | round(3) }}
+                    Verkoopgrens: EUR{{ discharge_start_price | float(0) | round(3) }}
+                    Netto zon resterend: {{ effective_solar_rem | float(0) | round(2) }} kWh
+                    (Profiel: {{ current_load_kw | float(0) }} kW afname nu)
+                    {% if conf_cheap_period != [] or conf_expensive_period != [] %}
+                    Zone-modus: {{ 'CHEAP ZONE actief' if is_cheap_zone else ('EXPENSIVE ZONE actief' if is_expensive_zone else 'buiten zone (Smart actief)') }}
+                    {% if is_cheap_zone %}
+                    Nog benodigd tot vol: {{ zone_charge_hours_needed }}u netladen ({{ zone_charge_net_kwh_needed }} kWh)
+                    {% endif %}
+                    {% if is_expensive_zone %}
+                    Nog te verkopen tot nacht-baseline ({{ p_morning_soc }}%): {{ zone_discharge_sellable_kwh }} kWh
+                    {% endif %}
+                    {% endif %}
+                  {% else %}
+                    Status: {{ current_soc }}% | Mode: {{ current_work_mode }}
+                    Net solar remaining: {{ effective_solar_rem | float(0) | round(2) }} kWh
+                  {% endif %}
+
+      - alias: "2. Boost Mode"
+        conditions:
+          - condition: template
+            value_template: "{{ is_boost_active }}"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ conf_status_log != [] }}"
+            then:
+              - service: input_text.set_value
+                target: {entity_id: !input status_log_helper}
+                data: {value: "Boost"}
+          - service: number.set_value
+            target: {entity_id: !input target_soc_number}
+            data: {value: 100}
+          - if:
+              - condition: template
+                value_template: "{{ current_work_mode != mode_self_use_tou }}"
+            then:
+              - service: select.select_option
+                target: {entity_id: !input work_mode_select}
+                data: {option: "{{ mode_self_use_tou }}"}
+
+      - alias: "3. Emergency Charge"
+        conditions:
+          - condition: template
+            value_template: >-
+              {% set target = states(conf_target_num)|float(0) %}
+              {% set is_active_emerg = is_force_charging and (target == ((p_min_base_soc | float(0)) + 2)) %}
+              {% set threshold = ((p_min_base_soc | float(0)) + 2) if is_active_emerg else (p_min_base_soc | float(0)) %}
+              {{ (current_soc | float(0)) < threshold }}
+          - condition: template
+            value_template: "{{ (current_price | float(0)) < ((p_max_cap | float(0)) * 1.5) }}"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ conf_status_log != [] }}"
+            then:
+              - service: input_text.set_value
+                target: {entity_id: !input status_log_helper}
+                data: {value: "Noodladen"}
+          - if:
+              - condition: template
+                value_template: "{{ (states(conf_target_num)|float(0) - ((p_min_base_soc|float(0)) + 2))|abs > 0.1 }}"
+            then:
+              - service: number.set_value
+                target: {entity_id: !input target_soc_number}
+                data: {value: "{{ (p_min_base_soc | float(0)) + 2 }}"}
+          - if:
+              - condition: template
+                value_template: "{{ current_work_mode != mode_self_use_tou }}"
+            then:
+              - service: select.select_option
+                target: {entity_id: !input work_mode_select}
+                data: {option: "{{ mode_self_use_tou }}"}
+              - if:
+                  - condition: template
+                    value_template: "{{ has_notify_device }}"
+                then:
+                  - domain: mobile_app
+                    type: notify
+                    device_id: !input notify_device
+                    message: "Noodladen gestart (EUR{{ current_price | float(0) | round(3) }})"
+
+      - alias: "3.3 Negatieve Terugleverprijs (Batterij Absorbeert Overschot)"
+        conditions:
+          - condition: template
+            value_template: "{{ conf_return_price != [] }}"
+          - condition: template
+            value_template: "{{ (current_raw_price | float(0)) < 0.0 }}"
+          - condition: template
+            value_template: "{{ (current_soc | float(0)) < 99 }}"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ conf_status_log != [] }}"
+            then:
+              - service: input_text.set_value
+                target: {entity_id: !input status_log_helper}
+                data: {value: "Neg-Export"}
+          - if:
+              - condition: template
+                value_template: "{{ (states(conf_target_num)|float(0) - 100)|abs > 0.1 }}"
+            then:
+              - service: number.set_value
+                target: {entity_id: !input target_soc_number}
+                data: {value: 100}
+          - if:
+              - condition: template
+                value_template: "{{ current_work_mode != mode_self_use }}"
+            then:
+              - service: select.select_option
+                target: {entity_id: !input work_mode_select}
+                data: {option: "{{ mode_self_use }}"}
+              - if:
+                  - condition: template
+                    value_template: "{{ notify_strategy_enabled }}"
+                then:
+                  - domain: mobile_app
+                    type: notify
+                    device_id: !input notify_device
+                    message: >-
+                      {% if language == 'nl' %}
+                        Terugleverprijs negatief (EUR{{ current_raw_price | float(0) | round(3) }}). Batterij
+                        vangt het zonoverschot op (Self-Use) i.p.v. terug te leveren.
+                      {% else %}
+                        Feed-in price negative (EUR{{ current_raw_price | float(0) | round(3) }}). Battery
+                        absorbs solar surplus (Self-Use) instead of exporting.
+                      {% endif %}
+
+      - alias: "3.5 Zone Charging (Cheap Period)"
+        conditions:
+          - condition: template
+            value_template: "{{ is_cheap_zone }}"
+          - condition: template
+            value_template: "{{ not is_zero_export_window }}"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ conf_status_log != [] }}"
+            then:
+              - service: input_text.set_value
+                target: {entity_id: !input status_log_helper}
+                data: {value: "{{ 'Zone-Net' if zone_charge_should_start_now else 'Zone-PV' }}"}
+          - variables:
+              desired_mode: "{{ mode_self_use_tou if zone_charge_should_start_now else mode_self_use }}"
+          - if:
+              - condition: template
+                value_template: "{{ (states(conf_target_num)|float(0) - 100)|abs > 0.1 }}"
+            then:
+              - service: number.set_value
+                target: {entity_id: !input target_soc_number}
+                data: {value: 100}
+          - if:
+              - condition: template
+                value_template: "{{ current_work_mode != desired_mode }}"
+            then:
+              - service: select.select_option
+                target: {entity_id: !input work_mode_select}
+                data: {option: "{{ desired_mode }}"}
+              - if:
+                  - condition: template
+                    value_template: "{{ notify_strategy_enabled }}"
+                then:
+                  - domain: mobile_app
+                    type: notify
+                    device_id: !input notify_device
+                    message: >-
+                      {% if desired_mode == mode_self_use_tou %}
+                        {% if language == 'nl' %}
+                          Vol vermogen laden (PV+grid) gestart (EUR{{ current_price | float(0) | round(3) }}) —
+                          laatst mogelijke moment om op tijd vol te zijn.
+                        {% else %}
+                          Full power charging (PV+grid) started (EUR{{ current_price | float(0) | round(3) }}) —
+                          last possible moment to finish in time.
+                        {% endif %}
+                      {% else %}
+                        {% if language == 'nl' %}
+                          Cheap Zone gestart: accu laadt bij op zon (Self-Use), doel SoC 100%. Nog
+                          {{ zone_charge_hours_needed }}u netladen verwacht nodig te zijn.
+                        {% else %}
+                          Cheap zone started: battery topping up on solar (Self-Use), target SoC 100%. Estimated
+                          {{ zone_charge_hours_needed }}h of grid charging still needed.
+                        {% endif %}
+                      {% endif %}
+
+      - alias: "3.6 Zone Discharging (Expensive Period)"
+        conditions:
+          - condition: template
+            value_template: "{{ is_expensive_zone }}"
+          - condition: template
+            value_template: "{{ not zone_discharge_floor_reached }}"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ conf_status_log != [] }}"
+            then:
+              - service: input_text.set_value
+                target: {entity_id: !input status_log_helper}
+                data: {value: "Zone-Verkoop"}
+          - if:
+              - condition: template
+                value_template: "{{ conf_discharge_slot_start != [] and conf_discharge_slot_end != [] }}"
+            then:
+              - service: time.set_value
+                target: {entity_id: !input discharge_slot_start_entity}
+                data: {time: "{{ discharge_slot_start_str }}"}
+              - service: time.set_value
+                target: {entity_id: !input discharge_slot_end_entity}
+                data: {time: "{{ discharge_slot_end_str }}"}
+          - if:
+              - condition: template
+                value_template: >-
+                  {% set target_mode = mode_feed_in_tou if (conf_discharge_slot_start != [] and conf_discharge_slot_end != []) else mode_feed_in %}
+                  {{ current_work_mode != target_mode }}
+            then:
+              - service: select.select_option
+                target: {entity_id: !input work_mode_select}
+                data:
+                  option: >-
+                    {{ mode_feed_in_tou if (conf_discharge_slot_start != [] and conf_discharge_slot_end != []) else mode_feed_in }}
+              - if:
+                  - condition: template
+                    value_template: "{{ notify_strategy_enabled }}"
+                then:
+                  - domain: mobile_app
+                    type: notify
+                    device_id: !input notify_device
+                    message: >-
+                      {% if language == 'nl' %}
+                        Expensive Zone actief: batterij verkoopt nu ({{ 'Feed-In Priority + TOU' if (conf_discharge_slot_start != [] and conf_discharge_slot_end != []) else 'Feed-In Priority' }}). Nog
+                        {{ zone_discharge_sellable_kwh }} kWh te verkopen tot de nacht-baseline ({{ p_morning_soc }}%).
+                      {% else %}
+                        Expensive zone active: battery selling now. {{ zone_discharge_sellable_kwh }}
+                        kWh left to sell before hitting the overnight baseline ({{ p_morning_soc }}%).
+                      {% endif %}
+
+      - alias: "3.65 Zone Discharge Hold (Nacht-baseline bereikt)"
+        conditions:
+          - condition: template
+            value_template: "{{ is_expensive_zone }}"
+          - condition: template
+            value_template: "{{ zone_discharge_floor_reached }}"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ conf_status_log != [] }}"
+            then:
+              - service: input_text.set_value
+                target: {entity_id: !input status_log_helper}
+                data: {value: "Zone-Vast"}
+          - if:
+              - condition: template
+                value_template: "{{ current_work_mode != mode_reserve }}"
+            then:
+              - service: select.select_option
+                target: {entity_id: !input work_mode_select}
+                data: {option: "{{ mode_reserve }}"}
+              - if:
+                  - condition: template
+                    value_template: "{{ notify_strategy_enabled }}"
+                then:
+                  - domain: mobile_app
+                    type: notify
+                    device_id: !input notify_device
+                    message: >-
+                      {% if language == 'nl' %}
+                        Nacht-baseline bereikt tijdens Expensive Zone ({{ p_morning_soc }}%). Verkopen gestopt,
+                        batterij vastgezet voor de nacht.
+                      {% else %}
+                        Overnight baseline reached during Expensive Zone ({{ p_morning_soc }}%). Selling
+                        stopped, battery locked for the night.
+                      {% endif %}
+          - &lock_soc_to_current
+            if:
+              - condition: template
+                value_template: >-
+                  {% set target = states(conf_target_num)|float(0) %}
+                  {{ (target - (current_soc|float(0))) > 2 or ((current_soc|float(0)) - target) >= (p_lock_step|float(0)) }}
+            then:
+              - service: number.set_value
+                target: {entity_id: !input target_soc_number}
+                data: {value: "{{ current_soc | int }}"}
+
+      - alias: "4. Smart Charging"
+        conditions:
+          - condition: template
+            value_template: "{{ not is_cheap_zone and not is_expensive_zone }}"
+          - condition: template
+            value_template: "{{ not is_zero_export_window }}"
+          - condition: or
+            conditions:
+              - condition: and
+                conditions:
+                  - condition: template
+                    value_template: "{{ (morning_survival_limit | float(-999.0)) != -999.0 }}"
+                  - condition: template
+                    value_template: "{{ (current_price | float(0.0)) | round(3) <= (morning_survival_limit | float(0.0)) | round(3) }}"
+                  - condition: template
+                    value_template: "{{ (current_soc | float(0.0)) < ((p_morning_soc | float(0.0)) - 0.1) }}"
+                  - condition: template
+                    value_template: "{{ (current_price | float(0.0)) < (p_max_cap | float(0.0)) }}"
+                  - condition: template
+                    value_template: "{{ (current_price | float(0.0)) | round(3) < (discharge_start_price | float(0.0)) | round(3) }}"
+              - condition: and
+                conditions:
+                  - condition: template
+                    value_template: "{{ (charge_limit_strict | float(-999.0)) != -999.0 }}"
+                  - condition: template
+                    value_template: "{{ (current_price | float(0.0)) | round(3) <= (charge_limit_strict | float(0.0)) | round(3) }}"
+                  - condition: template
+                    value_template: "{{ (current_soc | float(0.0)) < ((dynamic_target_soc | float(0.0)) - 1) }}"
+                  - condition: template
+                    value_template: "{{ (current_price | float(0.0)) < (p_max_cap | float(0.0)) }}"
+                  - condition: template
+                    value_template: "{{ not solar_charging_override }}"
+                  - condition: template
+                    value_template: "{{ (current_price | float(0.0)) | round(3) < (discharge_start_price | float(0.0)) | round(3) }}"
+              - condition: and
+                conditions:
+                  - condition: template
+                    value_template: "{{ (current_price | float(0.0)) | round(3) <= (buffer_limit | float(0.0)) | round(3) }}"
+                  - condition: template
+                    value_template: "{{ (current_soc | float(0.0)) < ((dynamic_target_soc | float(0.0)) - 1) }}"
+                  - condition: template
+                    value_template: "{{ (current_price | float(0.0)) < (p_max_cap | float(0.0)) }}"
+                  - condition: template
+                    value_template: "{{ not solar_charging_override }}"
+                  - condition: template
+                    value_template: "{{ (current_price | float(0.0)) | round(3) < (discharge_start_price | float(0.0)) | round(3) }}"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ conf_status_log != [] }}"
+            then:
+              - service: input_text.set_value
+                target: {entity_id: !input status_log_helper}
+                data: {value: "Laden"}
+          - if:
+              - condition: template
+                value_template: "{{ (states(conf_target_num)|float(0) - (active_target_soc|float(0)))|abs > 0.1 }}"
+            then:
+              - service: number.set_value
+                target: {entity_id: !input target_soc_number}
+                data: {value: "{{ active_target_soc | float(0) }}"}
+          - if:
+              - condition: template
+                value_template: "{{ current_work_mode != mode_self_use_tou }}"
+            then:
+              - service: select.select_option
+                target: {entity_id: !input work_mode_select}
+                data: {option: "{{ mode_self_use_tou }}"}
+              - if:
+                  - condition: template
+                    value_template: "{{ notify_strategy_enabled }}"
+                then:
+                  - domain: mobile_app
+                    type: notify
+                    device_id: !input notify_device
+                    message: "Start Laden (EUR{{ current_price | float(0) | round(3) }})"
+
+      - alias: "5. Discharging"
+        conditions:
+          - condition: template
+            value_template: "{{ not is_cheap_zone and not is_expensive_zone }}"
+          - condition: template
+            value_template: "{{ (current_soc | float(0)) > ((p_min_base_soc | float(0)) + 1) }}"
+          - condition: template
+            value_template: >-
+              {% if not reserve_like_active %}
+                {{ (current_price | float(0.0)) | round(3) >= ((discharge_start_price | float(0.0)) - 0.02) | round(3) }}
+              {% else %}
+                {{ (current_price | float(0.0)) | round(3) >= (discharge_start_price | float(0.0)) | round(3) }}
+              {% endif %}
+          - condition: template
+            value_template: "{{ (current_price | float(0.0)) | round(3) > (buffer_limit | float(0.0)) | round(3) }}"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ conf_status_log != [] }}"
+            then:
+              - service: input_text.set_value
+                target: {entity_id: !input status_log_helper}
+                data: {value: "Ontladen"}
+          - if:
+              - condition: template
+                value_template: "{{ conf_discharge_slot_start != [] and conf_discharge_slot_end != [] }}"
+            then:
+              - service: time.set_value
+                target: {entity_id: !input discharge_slot_start_entity}
+                data: {time: "{{ discharge_slot_start_str }}"}
+              - service: time.set_value
+                target: {entity_id: !input discharge_slot_end_entity}
+                data: {time: "{{ discharge_slot_end_str }}"}
+          - if:
+              - condition: template
+                value_template: >-
+                  {% set target_mode = mode_feed_in_tou if (conf_discharge_slot_start != [] and conf_discharge_slot_end != []) else mode_feed_in %}
+                  {{ current_work_mode != target_mode }}
+            then:
+              - service: select.select_option
+                target: {entity_id: !input work_mode_select}
+                data:
+                  option: >-
+                    {{ mode_feed_in_tou if (conf_discharge_slot_start != [] and conf_discharge_slot_end != []) else mode_feed_in }}
+              - if:
+                  - condition: template
+                    value_template: "{{ notify_strategy_enabled }}"
+                then:
+                  - domain: mobile_app
+                    type: notify
+                    device_id: !input notify_device
+                    message: "Start Ontladen (EUR{{ current_price | float(0) | round(3) }})"
+
+      - alias: "5.5. Solar Bypass (Feed-In Priority)"
+        conditions:
+          - condition: template
+            value_template: "{{ not is_cheap_zone and not is_expensive_zone }}"
+          - condition: template
+            value_template: "{{ not is_bypass_disabled }}"
+          - condition: template
+            value_template: "{{ is_daytime }}"
+          - condition: template
+            value_template: "{{ (current_price | float(0.0)) | round(3) >= (feed_in_start_price | float(0.0)) | round(3) }}"
+          - condition: template
+            value_template: "{{ (current_price | float(0.0)) | round(3) < (discharge_start_price | float(0.0)) | round(3) }}"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ conf_status_log != [] }}"
+            then:
+              - service: input_text.set_value
+                target: {entity_id: !input status_log_helper}
+                data: {value: "Bypass"}
+          - if:
+              - condition: template
+                value_template: "{{ current_work_mode != mode_feed_in }}"
+            then:
+              - service: select.select_option
+                target: {entity_id: !input work_mode_select}
+                data: {option: "{{ mode_feed_in }}"}
+              - if:
+                  - condition: template
+                    value_template: "{{ notify_strategy_enabled }}"
+                then:
+                  - domain: mobile_app
+                    type: notify
+                    device_id: !input notify_device
+                    message: "Solar Bypass Actief (Feed-In Priority). Zonnestroom naar net!"
+          - *lock_soc_to_current
+
+      - alias: "6. Smart Hold"
+        conditions:
+          - condition: template
+            value_template: "{{ not is_cheap_zone and not is_expensive_zone }}"
+          - condition: template
+            value_template: "{{ not is_bypass_disabled }}"
+          - condition: template
+            value_template: "{{ not is_zero_export_window }}"
+          - condition: template
+            value_template: "{{ (current_price | float(0.0)) | round(3) > (charge_limit_strict | float(0.0)) | round(3) }}"
+          - condition: template
+            value_template: "{{ (current_price | float(0.0)) | round(3) > (morning_survival_limit | float(0.0)) | round(3) }}"
+          - condition: template
+            value_template: >-
+              {% if not reserve_like_active %}
+                {{ (current_price | float(0.0)) | round(3) < ((discharge_start_price | float(0.0)) - 0.02) | round(3) }}
+              {% else %}
+                {{ (current_price | float(0.0)) | round(3) < (discharge_start_price | float(0.0)) | round(3) }}
+              {% endif %}
+          - condition: template
+            value_template: >-
+              {% if is_daytime %}
+                {{ (current_price | float(0.0)) | round(3) < (feed_in_start_price | float(0.0)) | round(3) }}
+              {% else %}
+                true
+              {% endif %}
+          - condition: template
+            value_template: "{{ (current_soc | float(0.0)) > (p_min_base_soc | float(0.0)) }}"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ conf_status_log != [] }}"
+            then:
+              - service: input_text.set_value
+                target: {entity_id: !input status_log_helper}
+                data: {value: "Wachten"}
+          - if:
+              - condition: template
+                value_template: "{{ current_work_mode != mode_self_use }}"
+            then:
+              - service: select.select_option
+                target: {entity_id: !input work_mode_select}
+                data: {option: "{{ mode_self_use }}"}
+              - if:
+                  - condition: template
+                    value_template: "{{ notify_strategy_enabled }}"
+                then:
+                  - domain: mobile_app
+                    type: notify
+                    device_id: !input notify_device
+                    message: "Smart Hold (Wachten op Top-Prijs, Self-Use dekt huisverbruik)"
+          - *lock_soc_to_current
+
+    default:
+      - if:
+          - condition: template
+            value_template: "{{ conf_status_log != [] }}"
+        then:
+          - service: input_text.set_value
+            target: {entity_id: !input status_log_helper}
+            data: {value: "Idle"}
+      - if:
+          - condition: template
+            value_template: "{{ current_work_mode != mode_self_use }}"
+        then:
+          - service: select.select_option
+            target: {entity_id: !input work_mode_select}
+            data: {option: "{{ mode_self_use }}"}
+
+  - if:
+      - condition: template
+        value_template: "{{ conf_return_price != [] }}"
+    then:
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ (current_price | float(0.0)) < 0.0 }}"
+            sequence:
+              - if:
+                  - condition: template
+                    value_template: "{{ conf_offgrid != [] and is_state(conf_offgrid, 'off') }}"
+                then:
+                  - service: switch.turn_on
+                    target: {entity_id: !input offgrid_switch}
+                  - if:
+                      - condition: template
+                        value_template: "{{ notify_strategy_enabled }}"
+                    then:
+                      - domain: mobile_app
+                        type: notify
+                        device_id: !input notify_device
+                        message: "All-in stroomprijs negatief (EUR{{ current_price | float(0) | round(3) }}). Offgrid modus INGESCHAKELD!"
+              - if:
+                  - condition: template
+                    value_template: "{{ conf_backflow != [] and states(conf_backflow)|float(-1) != 0.0 }}"
+                then:
+                  - service: number.set_value
+                    target: {entity_id: !input backflow_power_entity}
+                    data: {value: 0.0}
+
+          - conditions:
+              - condition: template
+                value_template: "{{ (current_price | float(0.0)) >= 0.0 }}"
+              - condition: template
+                value_template: "{{ (current_raw_price | float(0.0)) < 0.0 }}"
+            sequence:
+              - if:
+                  - condition: template
+                    value_template: "{{ conf_offgrid != [] and is_state(conf_offgrid, 'on') }}"
+                then:
+                  - service: switch.turn_off
+                    target: {entity_id: !input offgrid_switch}
+              - if:
+                  - condition: template
+                    value_template: "{{ conf_backflow != [] and states(conf_backflow)|float(-1) != 0.0 }}"
+                then:
+                  - service: number.set_value
+                    target: {entity_id: !input backflow_power_entity}
+                    data: {value: 0.0}
+                  - if:
+                      - condition: template
+                        value_template: "{{ notify_strategy_enabled }}"
+                    then:
+                      - domain: mobile_app
+                        type: notify
+                        device_id: !input notify_device
+                        message: "Kale stroomprijs negatief (EUR{{ current_raw_price | float(0) | round(3) }}). Export geblokkeerd (Backflow = 0W), Offgrid UIT."
+
+        default:
+          - if:
+              - condition: template
+                value_template: "{{ conf_offgrid != [] and is_state(conf_offgrid, 'on') }}"
+            then:
+              - service: switch.turn_off
+                target: {entity_id: !input offgrid_switch}
+          - if:
+              - condition: template
+                value_template: "{{ conf_backflow != [] and states(conf_backflow)|float(-1) != (p_normal_backflow|float(0)) }}"
+            then:
+              - service: number.set_value
+                target: {entity_id: !input backflow_power_entity}
+                data: {value: "{{ p_normal_backflow | float(0) }}"}
+              - if:
+                  - condition: template
+                    value_template: "{{ notify_strategy_enabled }}"
+                then:
+                  - domain: mobile_app
+                    type: notify
+                    device_id: !input notify_device
+                    message: "Stroomprijzen positief. Export vrijgegeven (Backflow = {{ p_normal_backflow }}W)."
+
+mode: single
