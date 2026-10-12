@@ -1,0 +1,115 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Bronnen",
+        "description": "Kies de sensoren voor accu, verbruik, Frank-prijzen en zonverwachting. Gebruik je Solcast, vul dan de Solcast-sensoren in; anders wordt Forecast.Solar gebruikt.",
+        "data": {
+          "soc_entity": "Laadtoestand accu (SOC %)",
+          "verbruik_entity": "Huisverbruik (W, zonder accu)",
+          "prijs_vandaag_entity": "Frank prijzen vandaag",
+          "prijs_morgen_entity": "Frank prijzen morgen",
+          "pv_rest_vandaag_entity": "PV-verwachting rest van vandaag (kWh)",
+          "pv_morgen_entity": "PV-verwachting morgen (kWh)",
+          "solcast_vandaag_entity": "Solcast vandaag (optioneel, gaat voor)",
+          "solcast_morgen_entity": "Solcast morgen (optioneel)"
+        }
+      },
+      "omvormer": {
+        "title": "Omvormer (Solis TOU)",
+        "description": "Kies de TOU-entiteiten van Solis Modbus voor laadslot 1 en ontlaadslot 1. Filter in Ontwikkelaarshulpmiddelen → Statussen op 'time_charging'.",
+        "data": {
+          "laad_start_entity": "TOU laadslot 1 – start",
+          "laad_eind_entity": "TOU laadslot 1 – einde",
+          "ontlaad_start_entity": "TOU ontlaadslot 1 – start",
+          "ontlaad_eind_entity": "TOU ontlaadslot 1 – einde",
+          "laad_stroom_entity": "TOU laadstroom (A)",
+          "ontlaad_stroom_entity": "TOU ontlaadstroom (A)",
+          "werkmodus_entity": "Werkmodus omvormer (optioneel)"
+        }
+      }
+    },
+    "error": {
+      "niet_gevonden": "Entiteit niet gevonden",
+      "geen_getal": "Deze sensor heeft geen getal als waarde",
+      "geen_prijzen": "Deze sensor heeft geen 'prices'-attribuut (Frank Quarter Prices)"
+    },
+    "abort": {
+      "already_configured": "Batterij Planner is al ingesteld"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Batterij Planner",
+        "menu_options": {
+          "instellingen": "Instellingen (accu, prijzen, rendement)",
+          "bronnen": "Bronnen (sensoren)",
+          "omvormer": "Omvormer-entiteiten"
+        }
+      },
+      "instellingen": {
+        "title": "Instellingen",
+        "data": {
+          "capaciteit_kwh": "Capaciteit accu",
+          "min_soc": "Minimale SOC",
+          "max_soc": "Maximale SOC",
+          "max_laad_w": "Max laadvermogen",
+          "max_ontlaad_w": "Max ontlaadvermogen",
+          "rendement_laden": "Rendement laden (AC → accu)",
+          "rendement_ontladen": "Rendement ontladen (accu → AC)",
+          "slijtage_eur_kwh": "Slijtagekosten per ontladen kWh",
+          "saldering": "Saldering",
+          "saldering_correctie": "Aftrek terugleverprijs tijdens saldering",
+          "teruglever_opslag": "Opslag teruglevering zonder saldering",
+          "pv_factor": "Correctiefactor PV-verwachting",
+          "eindwaarde_factor": "Waarde restlading einde planning",
+          "verbruik_fallback_w": "Verbruik zolang er nog niets geleerd is",
+          "accu_spanning": "Nominale accuspanning (omrekenen W → A)",
+          "vasthouden_stroom": "Laadstroom bij 'vasthouden'",
+          "werkmodus_tou": "Werkmodus waarin TOU actief is",
+          "notify_service": "Melding met plan voor morgen"
+        },
+        "data_description": {
+          "slijtage_eur_kwh": "Hoger = minder cycli; alleen ontladen bij grotere prijsverschillen.",
+          "saldering_correctie": "Normaal 0: terugleveren is tijdens saldering evenveel waard als de afnameprijs.",
+          "teruglever_opslag": "Frank: marktprijs + € 0,0182 vanaf 2027.",
+          "pv_factor": "< 1 = voorzichtiger dan de voorspelling.",
+          "vasthouden_stroom": "0 A in een laadslot = accu staat stil (Solis).",
+          "werkmodus_tou": "'Niet aanpassen' als de omvormer al permanent in de TOU-modus staat."
+        }
+      },
+      "bronnen": {
+        "title": "Bronnen",
+        "data": {
+          "soc_entity": "Laadtoestand accu (SOC %)",
+          "verbruik_entity": "Huisverbruik (W, zonder accu)",
+          "prijs_vandaag_entity": "Frank prijzen vandaag",
+          "prijs_morgen_entity": "Frank prijzen morgen",
+          "pv_rest_vandaag_entity": "PV-verwachting rest van vandaag (kWh)",
+          "pv_morgen_entity": "PV-verwachting morgen (kWh)",
+          "solcast_vandaag_entity": "Solcast vandaag (optioneel, gaat voor)",
+          "solcast_morgen_entity": "Solcast morgen (optioneel)"
+        }
+      },
+      "omvormer": {
+        "title": "Omvormer (Solis TOU)",
+        "data": {
+          "laad_start_entity": "TOU laadslot 1 – start",
+          "laad_eind_entity": "TOU laadslot 1 – einde",
+          "ontlaad_start_entity": "TOU ontlaadslot 1 – start",
+          "ontlaad_eind_entity": "TOU ontlaadslot 1 – einde",
+          "laad_stroom_entity": "TOU laadstroom (A)",
+          "ontlaad_stroom_entity": "TOU ontlaadstroom (A)",
+          "werkmodus_entity": "Werkmodus omvormer (optioneel)"
+        }
+      }
+    },
+    "error": {
+      "soc_bereik": "Minimale SOC moet lager zijn dan maximale SOC",
+      "niet_gevonden": "Entiteit niet gevonden",
+      "geen_getal": "Deze sensor heeft geen getal als waarde",
+      "geen_prijzen": "Deze sensor heeft geen 'prices'-attribuut"
+    }
+  }
+}

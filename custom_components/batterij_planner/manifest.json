@@ -1,0 +1,13 @@
+{
+  "domain": "batterij_planner",
+  "name": "Batterij Planner",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/",
+  "requirements": [],
+  "version": "5.0.0"
+}

@@ -1,0 +1,115 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Sources",
+        "description": "Select the sensors for battery, load, Frank prices and PV forecast.",
+        "data": {
+          "soc_entity": "Battery state of charge (%)",
+          "verbruik_entity": "House load power (W, excluding battery)",
+          "prijs_vandaag_entity": "Frank prices today",
+          "prijs_morgen_entity": "Frank prices tomorrow",
+          "pv_rest_vandaag_entity": "PV forecast remaining today (kWh)",
+          "pv_morgen_entity": "PV forecast tomorrow (kWh)",
+          "solcast_vandaag_entity": "Solcast today (optional, preferred)",
+          "solcast_morgen_entity": "Solcast tomorrow (optional)"
+        }
+      },
+      "omvormer": {
+        "title": "Inverter (Solis TOU)",
+        "description": "Select the Solis Modbus TOU entities for slot 1.",
+        "data": {
+          "laad_start_entity": "TOU charge slot 1 – start",
+          "laad_eind_entity": "TOU charge slot 1 – end",
+          "ontlaad_start_entity": "TOU discharge slot 1 – start",
+          "ontlaad_eind_entity": "TOU discharge slot 1 – end",
+          "laad_stroom_entity": "TOU charge current (A)",
+          "ontlaad_stroom_entity": "TOU discharge current (A)",
+          "werkmodus_entity": "Inverter work mode (optional)"
+        }
+      }
+    },
+    "error": {
+      "niet_gevonden": "Entity not found",
+      "geen_getal": "This sensor is not numeric",
+      "geen_prijzen": "This sensor has no 'prices' attribute"
+    },
+    "abort": {
+      "already_configured": "Already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Battery Planner",
+        "menu_options": {
+          "instellingen": "Settings",
+          "bronnen": "Sources",
+          "omvormer": "Inverter entities"
+        }
+      },
+      "instellingen": {
+        "title": "Settings",
+        "data": {
+          "capaciteit_kwh": "Battery capacity",
+          "min_soc": "Minimum SOC",
+          "max_soc": "Maximum SOC",
+          "max_laad_w": "Max charge power",
+          "max_ontlaad_w": "Max discharge power",
+          "rendement_laden": "Charge efficiency (AC → battery)",
+          "rendement_ontladen": "Discharge efficiency (battery → AC)",
+          "slijtage_eur_kwh": "Wear cost per discharged kWh",
+          "saldering": "Net metering",
+          "saldering_correctie": "Feed-in deduction during net metering",
+          "teruglever_opslag": "Feed-in premium without net metering",
+          "pv_factor": "PV forecast correction factor",
+          "eindwaarde_factor": "Value of remaining charge at horizon end",
+          "verbruik_fallback_w": "Load until profile is learned",
+          "accu_spanning": "Nominal battery voltage (W → A)",
+          "vasthouden_stroom": "Charge current for 'hold'",
+          "werkmodus_tou": "Work mode in which TOU is active",
+          "notify_service": "Notification with tomorrow's plan"
+        },
+        "data_description": {
+          "slijtage_eur_kwh": "Higher = fewer cycles.",
+          "saldering_correctie": "Normally 0.",
+          "teruglever_opslag": "Frank: market price + €0.0182 from 2027.",
+          "pv_factor": "< 1 = more conservative than forecast.",
+          "vasthouden_stroom": "0 A in a charge slot = battery idle (Solis).",
+          "werkmodus_tou": "Leave unchanged if the inverter is already in TOU mode."
+        }
+      },
+      "bronnen": {
+        "title": "Sources",
+        "data": {
+          "soc_entity": "Battery state of charge (%)",
+          "verbruik_entity": "House load power (W, excluding battery)",
+          "prijs_vandaag_entity": "Frank prices today",
+          "prijs_morgen_entity": "Frank prices tomorrow",
+          "pv_rest_vandaag_entity": "PV forecast remaining today (kWh)",
+          "pv_morgen_entity": "PV forecast tomorrow (kWh)",
+          "solcast_vandaag_entity": "Solcast today (optional, preferred)",
+          "solcast_morgen_entity": "Solcast tomorrow (optional)"
+        }
+      },
+      "omvormer": {
+        "title": "Inverter (Solis TOU)",
+        "data": {
+          "laad_start_entity": "TOU charge slot 1 – start",
+          "laad_eind_entity": "TOU charge slot 1 – end",
+          "ontlaad_start_entity": "TOU discharge slot 1 – start",
+          "ontlaad_eind_entity": "TOU discharge slot 1 – end",
+          "laad_stroom_entity": "TOU charge current (A)",
+          "ontlaad_stroom_entity": "TOU discharge current (A)",
+          "werkmodus_entity": "Inverter work mode (optional)"
+        }
+      }
+    },
+    "error": {
+      "soc_bereik": "Min SOC must be below max SOC",
+      "niet_gevonden": "Entity not found",
+      "geen_getal": "This sensor is not numeric",
+      "geen_prijzen": "This sensor has no 'prices' attribute"
+    }
+  }
+}
